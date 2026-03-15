@@ -8,7 +8,13 @@ import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 @Controller('api/transaksi')
 @UseGuards(JwtAuthGuard)
 export class TransaksiController {
-  constructor(private transaksiService: TransaksiService) {}
+  constructor(private transaksiService: TransaksiService) { }
+
+  @Get('siswa/list')
+  async listSiswa() {
+    const data = await this.transaksiService.listSiswa();
+    return { success: true, data };
+  }
 
   /** GET /transaksi/siswa?nis=1234567
    *  Dipanggil setelah scan QR atau input manual
@@ -27,7 +33,7 @@ export class TransaksiController {
   @Get('voucher')
   async cekVoucher(
     @Query('kode') kode: string,
-    @Query('nis')  nis:  string,
+    @Query('nis') nis: string,
   ) {
     const data = await this.transaksiService.cekVoucher({ kodeVoucher: kode, nis });
     return { success: true, data };
@@ -39,7 +45,7 @@ export class TransaksiController {
   @Get('produk')
   async getProduk(@Request() req: any) {
     const kantinId = this.extractKantinId(req.user);
-    const data     = await this.transaksiService.getProdukKatalog(kantinId);
+    const data = await this.transaksiService.getProdukKatalog(kantinId);
     return { success: true, data };
   }
 
@@ -52,14 +58,16 @@ export class TransaksiController {
     @Request() req: any,
   ) {
     const kantinId = this.extractKantinId(req.user);
-    const data     = await this.transaksiService.createTransaksi(dto, kantinId);
+    const data = await this.transaksiService.createTransaksi(dto, kantinId);
     return { success: true, data };
   }
 
   private extractKantinId(user: any): number {
     if (!user) throw new Error('User tidak ditemukan');
     const raw = user.id ?? user.sub ?? user.kantinId ?? null;
-    if (!raw)  throw new Error('Kantin ID tidak ditemukan di token');
+    if (!raw) throw new Error('Kantin ID tidak ditemukan di token');
     return Number(raw);
   }
+
+
 }

@@ -74,11 +74,18 @@ export interface PengaturanPenalty {
   rewardWadah: number; // key: coins_reward_wadah
 }
 
+export interface SiswaListItem {
+  nis: string;
+  nama: string;
+  kelas: string;
+  fotoUrl: string | null;
+}
+
 // ─── SERVICE ──────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class TransaksiService {
-  constructor(private supabaseService: SupabaseService) {}
+  constructor(private supabaseService: SupabaseService) { }
 
   private toRoman(value: number): string {
     const n = Number(value);
@@ -109,6 +116,44 @@ export class TransaksiService {
     return out || String(value ?? '');
   }
 
+  // GET /transaksi/siswa/list
+  // Mengembalikan daftar semua siswa aktif — dipakai untuk autocomplete di kasir.
+  // Hanya field minimal (nis, nama, kelas, foto) — ringan untuk 100-500 siswa.
+  async listSiswa(): Promise<SiswaListItem[]> {
+    const supabase = this.supabaseService.getClient();
+
+    // Ambil siswa aktif + join kelas dalam satu query
+    const { data, error } = await supabase
+      .from('siswa')
+      .select(`
+      nis,
+      nama,
+      foto_url,
+      kelas:kelas_id (
+        nama,
+        tingkat
+      )
+    `)
+      .eq('is_active', true)
+      .order('nama', { ascending: true });
+
+    if (error) throw new BadRequestException(`Gagal ambil daftar siswa: ${error.message}`);
+
+    return (data ?? []).map((s: any) => {
+      const kelas = s.kelas;
+      const kelasLabel = kelas
+        ? `${this.toRoman(Number(kelas.tingkat))} ${kelas.nama}`
+        : '-';
+
+      return {
+        nis: s.nis,
+        nama: s.nama,
+        kelas: kelasLabel,
+        fotoUrl: s.foto_url ?? null,
+      };
+    });
+  }
+
   // ── Helper: ambil nilai penalti & reward dari tabel pengaturan ────────────
   // Membaca key: coins_penalty_plastik, coins_penalty_kertas, coins_reward_wadah
   // Default fallback: plastik=5, kertas=2, reward=20 jika key belum ada di DB
@@ -127,7 +172,7 @@ export class TransaksiService {
 
     return {
       plastik: map['coins_penalty_plastik'] ?? 5,
-      kertas:  map['coins_penalty_kertas']  ?? 2,
+      kertas: map['coins_penalty_kertas'] ?? 2,
       rewardWadah: map['coins_reward_wadah'] ?? 20,
     };
   }
@@ -138,10 +183,10 @@ export class TransaksiService {
     penalty: PengaturanPenalty,
   ): number {
     switch (jenisKemasan) {
-      case 'plastik':       return penalty.plastik;
-      case 'kertas':        return penalty.kertas;
+      case 'plastik': return penalty.plastik;
+      case 'kertas': return penalty.kertas;
       case 'tanpa_kemasan': return 0;
-      default:              return 0; // null → tidak ada info kemasan → tidak dikurangi
+      default: return 0; // null → tidak ada info kemasan → tidak dikurangi
     }
   }
 
@@ -182,18 +227,18 @@ export class TransaksiService {
       .order('tanggal_berakhir', { ascending: true });
 
     return {
-      nis:     siswa.nis,
-      nama:    siswa.nama,
-      kelas:   kelasLabel,
-      coins:   siswa.coins   ?? 0,
-      streak:  siswa.streak  ?? 0,
+      nis: siswa.nis,
+      nama: siswa.nama,
+      kelas: kelasLabel,
+      coins: siswa.coins ?? 0,
+      streak: siswa.streak ?? 0,
       fotoUrl: siswa.foto_url ?? null,
       voucherAktif: (vouchers ?? []).map((v) => ({
-        id:              v.id,
-        kodeVoucher:     v.kode_voucher,
-        namaVoucher:     v.nama_voucher,
-        nominalVoucher:  v.nominal_voucher,
-        tipeVoucher:     v.tipe_voucher,
+        id: v.id,
+        kodeVoucher: v.kode_voucher,
+        namaVoucher: v.nama_voucher,
+        nominalVoucher: v.nominal_voucher,
+        tipeVoucher: v.tipe_voucher,
         tanggalBerakhir: v.tanggal_berakhir,
       })),
     };
@@ -202,9 +247,9 @@ export class TransaksiService {
   // ── 2. Cek Voucher ────────────────────────────────────────────────────────
   async cekVoucher(dto: CekVoucherDto): Promise<CekVoucherResult> {
     const supabase = this.supabaseService.getClient();
-    const today    = new Date().toISOString().split('T')[0];
-    const nis      = String(dto.nis).trim();
-    const kode     = dto.kodeVoucher.trim().toUpperCase();
+    const today = new Date().toISOString().split('T')[0];
+    const nis = String(dto.nis).trim();
+    const kode = dto.kodeVoucher.trim().toUpperCase();
 
     const { data: voucher } = await supabase
       .from('voucher')
@@ -222,11 +267,11 @@ export class TransaksiService {
       valid: true,
       message: 'Voucher valid',
       voucher: {
-        id:              voucher.id,
-        kodeVoucher:     voucher.kode_voucher,
-        namaVoucher:     voucher.nama_voucher,
-        nominalVoucher:  voucher.nominal_voucher,
-        tipeVoucher:     voucher.tipe_voucher,
+        id: voucher.id,
+        kodeVoucher: voucher.kode_voucher,
+        namaVoucher: voucher.nama_voucher,
+        nominalVoucher: voucher.nominal_voucher,
+        tipeVoucher: voucher.tipe_voucher,
         tanggalBerakhir: voucher.tanggal_berakhir,
       },
     };
@@ -254,13 +299,13 @@ export class TransaksiService {
     if (error) throw new BadRequestException(`Gagal ambil produk: ${error.message}`);
 
     return (produkRows ?? []).map((p) => ({
-      id:           p.id,
-      nama:         p.nama,
-      harga:        p.harga,
-      stok:         p.stok,
-      kategori:     p.kategori,
+      id: p.id,
+      nama: p.nama,
+      harga: p.harga,
+      stok: p.stok,
+      kategori: p.kategori,
       jenisKemasan: p.jenis_kemasan ?? null,
-      isActive:     p.is_active,
+      isActive: p.is_active,
       coinsPenaltyPerItem: this.getPenaltyPerItem(p.jenis_kemasan, penalty),
     }));
   }
@@ -268,7 +313,7 @@ export class TransaksiService {
   // ── 4. Buat Transaksi ─────────────────────────────────────────────────────
   async createTransaksi(dto: CreateTransaksiDto, kantinId: number): Promise<TransaksiResult> {
     const supabase = this.supabaseService.getClient();
-    const nis      = String(dto.nis).trim();
+    const nis = String(dto.nis).trim();
 
     // Validasi siswa
     const { data: siswa } = await supabase
@@ -320,15 +365,15 @@ export class TransaksiService {
     //   - Dikenakan penalti sesuai kemasannya
     const coinsPenaltyDetail: KemasPenaltyDetail[] = [];
     let coinsPenaltyTotal = 0;
-    let coinsRewardTotal  = 0;
-    
+    let coinsRewardTotal = 0;
+
     // Asumsikan semua transaksi dicatat sebagai isByoc=false di database globalnya,
     // karena reward dan penaltinya sudah terakumulasi benar di kolom
     // coins_reward dan coins_penalty. Kita hanya kirimkan totalnya.
     const isByocGlobal = false;
 
     for (const item of dto.items) {
-      const p          = produkMap[item.produkId];
+      const p = produkMap[item.produkId];
       const isPlastikAtauKertas = p.jenisKemasan === 'plastik' || p.jenisKemasan === 'kertas';
 
       if (item.isByoc && isPlastikAtauKertas) {
@@ -338,16 +383,16 @@ export class TransaksiService {
         coinsRewardTotal += penalty.rewardWadah * item.quantity;
       } else if (!item.isByoc) {
         // Hitung penalti kemasan seperti biasa
-        const perItem    = this.getPenaltyPerItem(p.jenisKemasan, penalty);
-        const totalItem  = perItem * item.quantity;
+        const perItem = this.getPenaltyPerItem(p.jenisKemasan, penalty);
+        const totalItem = perItem * item.quantity;
 
         if (perItem > 0) {
           coinsPenaltyDetail.push({
-            namaProduk:    p.nama,
-            jenisKemasan:  p.jenisKemasan!,
-            qty:           item.quantity,
+            namaProduk: p.nama,
+            jenisKemasan: p.jenisKemasan!,
+            qty: item.quantity,
             penaltyPerItem: perItem,
-            totalPenalty:  totalItem,
+            totalPenalty: totalItem,
           });
           coinsPenaltyTotal += totalItem;
         }
@@ -382,13 +427,13 @@ export class TransaksiService {
         ? Math.round((voucher.nominal_voucher / 100) * totalHarga)
         : voucher.nominal_voucher;
       totalDiskon = Math.min(totalDiskon, totalHarga);
-      voucherId   = voucher.id;
+      voucherId = voucher.id;
     }
 
     // ── Bayar pakai koin ───────────────────────────────────────────────────
     const coinsUsed = 0;
 
-    const totalBayar    = Math.max(0, totalHarga - totalDiskon);
+    const totalBayar = Math.max(0, totalHarga - totalDiskon);
     const kodeTransaksi = `TRX-${kantinId}-${Date.now()}`;
 
     // ── INSERT transaksi ───────────────────────────────────────────────────
@@ -397,16 +442,16 @@ export class TransaksiService {
       .insert({
         kode_transaksi: kodeTransaksi,
         nis,
-        kantin_id:      kantinId,
-        total_harga:    totalHarga,
-        total_diskon:   totalDiskon,
-        total_bayar:    totalBayar,
-        coins_used:     coinsUsed,
+        kantin_id: kantinId,
+        total_harga: totalHarga,
+        total_diskon: totalDiskon,
+        total_bayar: totalBayar,
+        coins_used: coinsUsed,
         payment_method: dto.paymentMethod,
-        voucher_id:     voucherId,
-        is_byoc:        isByocGlobal,
-        coins_reward:   coinsRewardTotal,
-        coins_penalty:  coinsPenaltyTotal,
+        voucher_id: voucherId,
+        is_byoc: isByocGlobal,
+        coins_reward: coinsRewardTotal,
+        coins_penalty: coinsPenaltyTotal,
       })
       .select('id, kode_transaksi, created_at')
       .single();
@@ -418,11 +463,11 @@ export class TransaksiService {
       .from('detail_transaksi')
       .insert(dto.items.map((item) => ({
         transaksi_id: txRow.id,
-        produk_id:    item.produkId,
-        nama_produk:  produkMap[item.produkId].nama,
-        quantity:     item.quantity,
+        produk_id: item.produkId,
+        nama_produk: produkMap[item.produkId].nama,
+        quantity: item.quantity,
         harga_satuan: produkMap[item.produkId].harga,
-        subtotal:     produkMap[item.produkId].harga * item.quantity,
+        subtotal: produkMap[item.produkId].harga * item.quantity,
       })));
 
     if (errDetail) throw new BadRequestException(`Gagal menyimpan detail: ${errDetail.message}`);
@@ -438,14 +483,14 @@ export class TransaksiService {
 
     // ── Update coins siswa ─────────────────────────────────────────────────
     // Penalti kemasan mengurangi koin, Reward kemasan menambah koin.
-    const coinsAwal     = siswa.coins ?? 0;
-    let coinsFinal      = coinsAwal;
-    
+    const coinsAwal = siswa.coins ?? 0;
+    let coinsFinal = coinsAwal;
+
     // Kurangi penalti dulu
     if (coinsPenaltyTotal > 0) {
       coinsFinal = Math.max(0, coinsFinal - coinsPenaltyTotal);
     }
-    
+
     // Tambah reward
     if (coinsRewardTotal > 0) {
       coinsFinal = coinsFinal + coinsRewardTotal;
@@ -465,20 +510,20 @@ export class TransaksiService {
         .update({ status: 'used', used_at: new Date().toISOString(), transaction_id: txRow.id })
         .eq('id', voucherId);
     }
- 
+
     return {
-      id:                 txRow.id,
-      kodeTransaksi:      txRow.kode_transaksi,
+      id: txRow.id,
+      kodeTransaksi: txRow.kode_transaksi,
       totalHarga,
       totalDiskon,
       totalBayar,
       coinsUsed,
-      isByoc:             isByocGlobal,
-      coinsReward:        coinsRewardTotal,
+      isByoc: isByocGlobal,
+      coinsReward: coinsRewardTotal,
       coinsPenaltyTotal,
       coinsPenaltyDetail,
-      paymentMethod:      dto.paymentMethod,
-      createdAt:          txRow.created_at,
+      paymentMethod: dto.paymentMethod,
+      createdAt: txRow.created_at,
     };
   }
 }
