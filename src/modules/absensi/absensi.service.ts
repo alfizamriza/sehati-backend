@@ -17,10 +17,13 @@ export class AbsensiService {
   // akibat perbedaan timezone server vs UTC
   // =====================================================
   private getTodayString(): string {
+    // Paksa gunakan zona waktu WIB agar server UTC tidak membuat hari mundur
     const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
+    const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+    const wib = new Date(utcMs + 7 * 60 * 60 * 1000);
+    const year = wib.getUTCFullYear();
+    const month = String(wib.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(wib.getUTCDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   }
 

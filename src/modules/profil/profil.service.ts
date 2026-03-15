@@ -68,6 +68,34 @@ export class ProfilService {
     private streakService: StreakService,
   ) { }
 
+  // ============================================
+  // Helper: format tanggal ke DD MMMM YYYY (id-ID)
+  // ============================================
+  private formatDateIndo(dateStr: string | null): string {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '-';
+    return date.toLocaleDateString('id-ID', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'Asia/Jakarta',
+    });
+  }
+
+  // ============================================
+  // Helper: get today string in WIB to avoid timezone shift
+  // ============================================
+  private getTodayWIB(): string {
+    const now = new Date();
+    const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+    const wib = new Date(utcMs + 7 * 60 * 60 * 1000);
+    const y = wib.getUTCFullYear();
+    const m = String(wib.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(wib.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
   // =====================================================
   // GET PROFIL LENGKAP
   // =====================================================
@@ -155,17 +183,37 @@ export class ProfilService {
       .eq('nis', nisStr)
       .order('created_at', { ascending: false });
 
-    const vouchers: ProfilVoucher[] = (voucherRows || []).map((v: any) => ({
-      id: String(v.id ?? ''),
-      kodeVoucher: v.kode_voucher ?? '-',
-      namaVoucher: v.nama_voucher ?? '-',
-      tanggalBerlaku: v.tanggal_berlaku ?? '-',
-      tanggalBerakhir: v.tanggal_berakhir ?? '-',
-      nominalVoucher: Number(v.nominal_voucher ?? 0),
-      tipeVoucher: v.tipe_voucher === 'percentage' ? 'percentage' : 'fixed',
-      status: v.status ?? 'available',
-      usedAt: v.used_at ?? null,
-    }));
+    const today = this.getTodayWIB();
+    const expireIds: string[] = [];
+
+    const vouchers: ProfilVoucher[] = (voucherRows || []).map((v: any) => {
+      const status = (v.status ?? 'available') as string;
+      const isExpired = status === 'available' && v.tanggal_berakhir && v.tanggal_berakhir < today;
+      if (isExpired && v.id) expireIds.push(v.id);
+
+      return {
+        id: String(v.id ?? ''),
+        kodeVoucher: v.kode_voucher ?? '-',
+        namaVoucher: v.nama_voucher ?? '-',
+        tanggalBerlaku: this.formatDateIndo(v.tanggal_berlaku ?? null),
+        tanggalBerakhir: this.formatDateIndo(v.tanggal_berakhir ?? null),
+        nominalVoucher: Number(v.nominal_voucher ?? 0),
+        tipeVoucher: v.tipe_voucher === 'percentage' ? 'percentage' : 'fixed',
+        status: isExpired ? 'expired' : status,
+        usedAt: v.used_at ?? null,
+      };
+    });
+
+    // Update status kadaluarsa di database (non-blocking)
+    if (expireIds.length > 0) {
+      supabase
+        .from('voucher')
+        .update({ status: 'expired', updated_at: new Date().toISOString() })
+        .in('id', expireIds)
+        .then(({ error }) => {
+          if (error) console.error('[Profil] Gagal auto-expire voucher:', error);
+        });
+    }
 
     return {
       profil: {

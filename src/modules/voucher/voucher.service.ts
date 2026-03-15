@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -104,8 +104,8 @@ export class VoucherService {
         id: v.id,
         kodeVoucher: v.kode_voucher,
         namaVoucher: v.nama_voucher,
-        tanggalBerlaku: this.formatDateIndo(v.tanggal_berlaku),
-        tanggalBerakhir: this.formatDateIndo(v.tanggal_berakhir),
+        tanggalBerlaku: v.tanggal_berlaku,
+        tanggalBerakhir: v.tanggal_berakhir,
         penerima: siswa
           ? {
             nis: siswa.nis,
@@ -116,8 +116,8 @@ export class VoucherService {
         nominalVoucher: v.nominal_voucher,
         tipeVoucher: v.tipe_voucher,
         status: v.status,
-        usedAt: this.formatDateIndo(v.used_at),
-        createdAt: this.formatDateIndo(v.created_at),
+        usedAt: v.used_at,
+        createdAt: v.created_at,
       };
     });
 
@@ -208,8 +208,8 @@ export class VoucherService {
         id: voucher.id,
         kodeVoucher: voucher.kode_voucher,
         namaVoucher: voucher.nama_voucher,
-        tanggalBerlaku: this.formatDateIndo(voucher.tanggal_berlaku),
-        tanggalBerakhir: this.formatDateIndo(voucher.tanggal_berakhir),
+        tanggalBerlaku: voucher.tanggal_berlaku,
+        tanggalBerakhir: voucher.tanggal_berakhir,
         penerima: siswa
           ? {
             nis: siswa.nis,
@@ -220,8 +220,8 @@ export class VoucherService {
         nominalVoucher: voucher.nominal_voucher,
         tipeVoucher: voucher.tipe_voucher,
         status: voucher.status,
-        usedAt: this.formatDateIndo(voucher.used_at),
-        createdAt: this.formatDateIndo(voucher.created_at),
+        usedAt: voucher.used_at,
+        createdAt: voucher.created_at,
       },
     };
   }
