@@ -82,9 +82,16 @@ export interface StatCard {
 export interface TrendPoint {
   date: string;           // label sumbu X
   transaksi: number;
-  coins: number;
+  kemasanPlastik: number;
+  kemasanKertas: number;
   pelanggaran: number;
   siswaAktif: number;
+}
+
+export interface HeatmapCell {
+  day: number;   // 0=Senin ... 6=Minggu
+  hour: number;  // 0-23
+  count: number;
 }
 
 export interface DonutSlice {
@@ -118,6 +125,7 @@ export interface AnalyticsResponse {
   range: DateRange;
   stats: StatCard[];
   trend: TrendPoint[];
+  heatmapPelanggaran: HeatmapCell[];
   donutMetodeBayar: DonutSlice[];
   donutKemasan: DonutSlice[];
   topSiswa: RankingItem[];
@@ -280,9 +288,29 @@ export class AnalyticsService {
     // ── TREND DATA ────────────────────────────────────────────────────────
     const trend = await this.buildTrend(supabase, range, totalSiswaAktif);
 
+    // ── HEATMAP PELANGGARAN (hari × jam) ────────────────────────────────────
+    const heatGrid = Array.from({ length: 7 }, () => Array(24).fill(0));
+    curPel.forEach((p: any) => {
+      const dt   = new Date(p.created_at);
+      const hour = dt.getHours();
+      const day  = (dt.getDay() + 6) % 7; // convert: Mon=0 ... Sun=6
+      heatGrid[day][hour] += 1;
+    });
+    const heatmapPelanggaran = heatGrid.flatMap((row, day) =>
+      row.map((count, hour) => ({ day, hour, count })),
+    );
+
     // ── DONUT: Metode Bayar ────────────────────────────────────────────────
     const methodCount: Record<string, number> = { tunai: 0, voucher: 0, coins: 0 };
-    curTx.forEach((t: any) => { if (t.payment_method) methodCount[t.payment_method] = (methodCount[t.payment_method] ?? 0) + 1; });
+    curTx.forEach((t: any) => {
+      // pembayaran utama (tunai / voucher)
+      const pm = t.payment_method;
+      if (pm === 'voucher') methodCount.voucher += 1;
+      else methodCount.tunai += 1;
+
+      // catat penggunaan koin meskipun payment_method bukan 'coins'
+      if ((t.coins_used ?? 0) > 0) methodCount.coins += 1;
+    });
     const donutMetodeBayar: DonutSlice[] = [
       { name: 'Tunai',   value: methodCount.tunai   ?? 0, color: '#10b981' },
       { name: 'Voucher', value: methodCount.voucher ?? 0, color: '#8B5CF6' },
@@ -329,6 +357,7 @@ export class AnalyticsService {
 
     return {
       period, range, stats, trend,
+      heatmapPelanggaran,
       donutMetodeBayar, donutKemasan,
       topSiswa, topProduk, progressKelas,
       lastUpdated: new Date().toISOString(),
@@ -373,6 +402,7 @@ export class AnalyticsService {
     const [
       { data: txRows },
       { data: pelRows },
+      { data: detRows },
     ] = await Promise.all([
       supabase
         .from('transaksi')
@@ -384,10 +414,16 @@ export class AnalyticsService {
         .select('created_at')
         .gte('created_at', `${range.start}T00:00:00`)
         .lte('created_at', `${range.end}T23:59:59`),
+      supabase
+        .from('detail_transaksi')
+        .select('quantity,produk:produk_id(jenis_kemasan),transaksi:transaksi_id(created_at)')
+        .gte('transaksi.created_at', `${range.start}T00:00:00`)
+        .lte('transaksi.created_at', `${range.end}T23:59:59`),
     ]);
 
     const transaksiRows = txRows ?? [];
     const pelanggaranRows = pelRows ?? [];
+    const detailRows = detRows ?? [];
 
     for (let i = 0; i < days; i += step) {
       const d      = new Date(start); d.setDate(d.getDate() + i);
@@ -408,6 +444,21 @@ export class AnalyticsService {
         return ts >= startWindow && ts <= endWindow;
       });
 
+      const kemasanDay = detailRows
+        .filter((det: any) => {
+          const ts = new Date(det.transaksi?.created_at ?? det.created_at).getTime();
+          const jenis = det.produk?.jenis_kemasan;
+          return ts >= startWindow && ts <= endWindow && (jenis === 'plastik' || jenis === 'kertas');
+        });
+
+      const kemasanPlastik = kemasanDay
+        .filter((det: any) => det.produk?.jenis_kemasan === 'plastik')
+        .reduce((sum: number, det: any) => sum + (det.quantity ?? 1), 0);
+
+      const kemasanKertas = kemasanDay
+        .filter((det: any) => det.produk?.jenis_kemasan === 'kertas')
+        .reduce((sum: number, det: any) => sum + (det.quantity ?? 1), 0);
+
       const label = step === 1
         ? new Date(ds).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
         : `${new Date(ds).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}`;
@@ -415,7 +466,8 @@ export class AnalyticsService {
       points.push({
         date:         label,
         transaksi:    txDay.length,
-        coins:        txDay.reduce((s: number, t: any) => s + (t.coins_used ?? 0), 0),
+        kemasanPlastik,
+        kemasanKertas,
         pelanggaran:  pelDay.length,
         siswaAktif:   totalSiswaAktif,
       });
