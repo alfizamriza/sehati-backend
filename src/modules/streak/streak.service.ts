@@ -11,14 +11,36 @@ export class StreakService {
    * dengan kolom `tanggal` di absensi_tumbler yang disimpan dalam WIB.
    */
   private getTodayWIB(): string {
-    const now = new Date();
-    const wibDate = new Date(now.getTime() + 7 * 60 * 60 * 1000);
-    return wibDate.toISOString().split('T')[0];
+    const wibString = new Date().toLocaleString('en-US', { timeZone: 'Asia/Jakarta' });
+    const wibDate = new Date(wibString);
+    const y = wibDate.getFullYear();
+    const m = String(wibDate.getMonth() + 1).padStart(2, '0');
+    const d = String(wibDate.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
 
   private parseDateOnly(dateStr: string): Date {
     const [year, month, day] = dateStr.split('-').map(Number);
     return new Date(year, (month || 1) - 1, day || 1);
+  }
+
+  /**
+   * Cek apakah siswa memiliki izin/sakit yang disetujui pada tanggal tertentu.
+   */
+  private async isStudentExcused(date: Date, nis: string): Promise<boolean> {
+    const supabase = this.supabaseService.getClient();
+    const wibDate = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+    const dateStr = wibDate.toISOString().split('T')[0];
+
+    const { data } = await supabase
+      .from('siswa_izin')
+      .select('id')
+      .eq('nis', nis)
+      .eq('tanggal', dateStr)
+      .eq('status', 'approved')
+      .maybeSingle();
+
+    return !!data;
   }
 
   /**
@@ -51,10 +73,17 @@ export class StreakService {
   /**
    * Cek apakah tanggal adalah hari kerja (non-weekend, non-holiday)
    */
-  async isWorkday(date: Date): Promise<boolean> {
+  async isWorkday(date: Date, nis?: string): Promise<boolean> {
     if (this.isWeekend(date)) return false;
     const holiday = await this.isHoliday(date);
-    return !holiday;
+    if (holiday) return false;
+
+    if (nis) {
+      const excused = await this.isStudentExcused(date, nis);
+      if (excused) return false;
+    }
+
+    return true;
   }
 
   /**
@@ -99,7 +128,7 @@ export class StreakService {
 
     // Cek apakah hari ini hari kerja
     const today = this.parseDateOnly(todayStr);
-    const isTodayWorkday = await this.isWorkday(today);
+    const isTodayWorkday = await this.isWorkday(today, nis);
 
     let effectiveStreak = siswa.streak || 0;
 
@@ -111,7 +140,11 @@ export class StreakService {
       if (!lastStreakDate) {
         effectiveStreak = 0;
       } else {
-        const workdaysSinceLastStreak = await this.countWorkdaysBetween(lastStreakDate, today);
+        const workdaysSinceLastStreak = await this.countWorkdaysBetween(
+          lastStreakDate,
+          today,
+          nis,
+        );
 
         if (workdaysSinceLastStreak > 1) {
           effectiveStreak = 0;
@@ -163,7 +196,7 @@ export class StreakService {
     if (!lastStreakDate) {
       newStreak = 1;
     } else {
-      const daysSinceLastStreak = await this.countWorkdaysBetween(lastStreakDate, absenDate);
+      const daysSinceLastStreak = await this.countWorkdaysBetween(lastStreakDate, absenDate, nis);
 
       if (daysSinceLastStreak === 1) {
         newStreak += 1;
@@ -190,13 +223,13 @@ export class StreakService {
   /**
    * Hitung jumlah hari kerja antara 2 tanggal (exclude start, include end)
    */
-  async countWorkdaysBetween(startDate: Date, endDate: Date): Promise<number> {
+  async countWorkdaysBetween(startDate: Date, endDate: Date, nis?: string): Promise<number> {
     let count = 0;
     const current = new Date(startDate);
 
     while (current < endDate) {
       current.setDate(current.getDate() + 1);
-      if (await this.isWorkday(current)) {
+      if (await this.isWorkday(current, nis)) {
         count++;
       }
     }

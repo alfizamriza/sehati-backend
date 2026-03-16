@@ -23,6 +23,7 @@ import { RiwayatModule } from './modules/riwayat/riwayat.module';
 import { ProfilModule } from './modules/profil/profil.module';
 import { RiwayatKantinModule } from './modules/riwayat-kantin/riwayat-kantin.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { IzinModule } from './modules/izin/izin.module';
 import * as config from './config/app.config';
 
 @Module({
@@ -53,6 +54,7 @@ import * as config from './config/app.config';
     ProfilModule,
     RiwayatKantinModule,
     AnalyticsModule,
+    IzinModule,
   ],
   controllers: [AppController],
   providers: [AppService],

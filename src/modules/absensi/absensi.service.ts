@@ -17,13 +17,12 @@ export class AbsensiService {
   // akibat perbedaan timezone server vs UTC
   // =====================================================
   private getTodayString(): string {
-    // Paksa gunakan zona waktu WIB agar server UTC tidak membuat hari mundur
-    const now = new Date();
-    const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-    const wib = new Date(utcMs + 7 * 60 * 60 * 1000);
-    const year = wib.getUTCFullYear();
-    const month = String(wib.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(wib.getUTCDate()).padStart(2, '0');
+    // Paksa gunakan zona waktu Asia/Jakarta via Intl agar konsisten di semua host
+    const wibString = new Date().toLocaleString('en-US', { timeZone: 'Asia/Jakarta' });
+    const wibDate = new Date(wibString);
+    const year = wibDate.getFullYear();
+    const month = String(wibDate.getMonth() + 1).padStart(2, '0');
+    const day = String(wibDate.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   }
 
@@ -76,11 +75,25 @@ export class AbsensiService {
     return isLibur;
   }
 
+  // Cek apakah siswa punya izin/sakit yang sudah di-approve pada tanggal tsb.
+  private async isStudentExcused(tanggal: string, nis: string): Promise<boolean> {
+    const supabase = this.supabaseService.getClient();
+    const { data } = await supabase
+      .from('siswa_izin')
+      .select('id')
+      .eq('nis', nis)
+      .eq('tanggal', tanggal)
+      .eq('status', 'approved')
+      .maybeSingle();
+
+    return !!data;
+  }
+
   // =====================================================
   // CARI HARI SEKOLAH SEBELUMNYA
   // FIX: sama, pakai string 'true' untuk is_active
   // =====================================================
-  private async getHariSekolahSebelumnya(dari: string): Promise<string | null> {
+  private async getHariSekolahSebelumnya(dari: string, nis: string): Promise<string | null> {
     const supabase = this.supabaseService.getClient();
 
     const batasAwal = new Date(dari);
@@ -103,6 +116,7 @@ export class AbsensiService {
       const dayOfWeek = current.getDay();
 
       if (dayOfWeek === 0 || dayOfWeek === 6 || setLibur.has(dateStr)) continue;
+      if (await this.isStudentExcused(dateStr, nis)) continue;
 
       return dateStr;
     }
@@ -117,10 +131,11 @@ export class AbsensiService {
     currentStreak: number,
     lastDate: string | null,
     today: string,
+    nis: string,
   ): Promise<{ newStreak: number; streakBonus: number }> {
     if (!lastDate) return { newStreak: 1, streakBonus: 0 };
 
-    const hariSekolahSebelumnya = await this.getHariSekolahSebelumnya(today);
+    const hariSekolahSebelumnya = await this.getHariSekolahSebelumnya(today, nis);
     const newStreak =
       hariSekolahSebelumnya && lastDate === hariSekolahSebelumnya
         ? currentStreak + 1
@@ -235,6 +250,17 @@ export class AbsensiService {
       );
     }
 
+    // 3b. Blokir jika siswa punya izin/sakit approved hari ini
+    const excusedToday = await this.isStudentExcused(today, nis);
+    if (excusedToday) {
+      throw new BadRequestException(
+        JSON.stringify({
+          code: 'IZIN_HARI_INI',
+          message: `${siswa.nama} memiliki izin/sakit hari ini. Absensi ditolak.`,
+        }),
+      );
+    }
+
     // 4. Cek sudah absen hari ini
     const { data: existing } = await supabase
       .from('absensi_tumbler')
@@ -252,6 +278,7 @@ export class AbsensiService {
       siswa.streak || 0,
       siswa.last_streak_date,
       today,
+      nis,
     );
     const totalCoins = coinsReward + streakBonus;
 
@@ -330,15 +357,34 @@ export class AbsensiService {
 
     const sudahAbsenSet = new Set((sudahAbsen || []).map((a) => a.nis));
 
+    // Ambil izin approved hari ini
+    const { data: izinRows } = await supabase
+      .from('siswa_izin')
+      .select('nis, tipe, catatan')
+      .in('nis', nisList)
+      .eq('tanggal', today)
+      .eq('status', 'approved');
+
+    const izinMap = new Map<string, { tipe: string; catatan: string | null }>();
+    (izinRows || []).forEach((row) =>
+      izinMap.set(row.nis, { tipe: row.tipe, catatan: row.catatan ?? null }),
+    );
+
     const result = await Promise.all(
       siswas.map(async (siswa) => {
         const streakData = await this.streakService.calculateStreak(siswa.nis);
+        const izin = izinMap.get(siswa.nis);
+        const adaIzin = Boolean(izin);
+        const sudahAbsen = adaIzin ? false : sudahAbsenSet.has(siswa.nis);
         return {
           nis: siswa.nis,
           nama: siswa.nama,
           streak: streakData.currentStreak,
           coins: siswa.coins || 0,
-          sudahAbsen: sudahAbsenSet.has(siswa.nis),
+          sudahAbsen,
+          izinHariIni: adaIzin
+            ? { ada: true, tipe: izin?.tipe || null, catatan: izin?.catatan || null }
+            : { ada: false, tipe: null, catatan: null },
         };
       }),
     );
