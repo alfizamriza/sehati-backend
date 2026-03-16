@@ -4,13 +4,14 @@ import { StreakService } from 'src/modules/streak/streak.service';
 
 interface SchoolDay { date: string; label: string }
 
-export type DayStatus = 'hadir' | 'pelanggaran' | 'plastik' | 'libur' | 'kosong';
+export type DayStatus = 'hadir' | 'pelanggaran' | 'plastik' | 'libur' | 'izin' | 'kosong';
 
 export interface CalendarDay {
   date: string; label: string; dayName: string;
   status: DayStatus; isToday: boolean; isWeekend: boolean;
   hadir: boolean; pelanggaranCount: number; plastikCount: number;
-  keteranganLibur: string | null;  // ← baru: nama hari libur untuk tooltip
+  keteranganLibur: string | null;  // ← nama hari libur untuk tooltip
+  izin?: { tipe: string; catatan?: string | null } | null;
 }
 
 export interface ComplianceItem {
@@ -155,6 +156,20 @@ export class SiswaDashboardService {
       (liburRows ?? []).map((r: any) => [String(r.tanggal).split('T')[0], r.keterangan as string])
     );
 
+    // ——— 5. Izin/sakit approved ———
+    const { data: izinRows } = await supabase
+      .from('siswa_izin')
+      .select('tanggal, tipe, catatan, status')
+      .eq('nis', nis)
+      .eq('status', 'approved')
+      .in('tanggal', allDates);
+
+    const izinMap = new Map<string, { tipe: string; catatan?: string | null }>();
+    (izinRows ?? []).forEach((r: any) => {
+      const tgl = String(r.tanggal).split('T')[0];
+      izinMap.set(tgl, { tipe: r.tipe, catatan: r.catatan ?? null });
+    });
+
     const dayNames = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
 
     return days.map((day) => {
@@ -171,11 +186,13 @@ export class SiswaDashboardService {
       // FIX 2: Status priority yang benar
       // - Libur/weekend → selalu "libur" (termasuk masa depan)
       // - Masa depan non-libur → "kosong" (belum terjadi, tidak ada data)
+      // - Izin approved → status "izin" (di atas pelanggaran/plastik/hadir)
       // - Pelanggaran prioritas tertinggi untuk hari lampau
       // - Plastik bisa muncul meski tidak hadir (beli tapi tidak bawa tumbler)
       let status: DayStatus = 'kosong';
       if (isHoliday) status = 'libur';
       else if (isFuture) status = 'kosong';
+      else if (izinMap.has(day.date)) status = 'izin';
       else if (pelanggaranCount > 0) status = 'pelanggaran';
       else if (plastikCount > 0) status = 'plastik';
       else if (hadir) status = 'hadir';
@@ -195,6 +212,7 @@ export class SiswaDashboardService {
         keteranganLibur: isHoliday
           ? (liburKeterangan.get(day.date) ?? (isWeekend ? 'Akhir pekan' : null))
           : null,
+        izin: izinMap.get(day.date) ?? null,
       };
     });
   }
