@@ -3,7 +3,7 @@ import { IsNotEmpty, IsString, IsInt, IsBoolean, IsOptional, MinLength, Length }
 export class CreateSiswaDto {
   @IsNotEmpty({ message: 'NIS tidak boleh kosong' })
   @IsString()
-  @Length(10, 20, { message: 'NIS harus 10-20 karakter' })
+  @Length(8, 20, { message: 'NIS harus 8-20 karakter' })
   nis!: string;
 
   @IsNotEmpty({ message: 'Nama tidak boleh kosong' })
