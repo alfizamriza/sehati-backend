@@ -152,14 +152,15 @@ export class ProdukService {
     if (!dto.kategori?.trim()) throw new BadRequestException('Kategori wajib diisi');
 
     const isTitipan = dto.isTitipan ?? false;
-    const stokHarian = isTitipan ? (dto.stokHarian ?? dto.stok ?? 0) : null;
+    const stokTitipan = dto.stokHarian ?? dto.stok ?? 0;
+    const stokHarian = isTitipan ? stokTitipan : null;
 
     const { data, error } = await supabase
       .from('produk')
       .insert({
         nama: dto.nama.trim(),
         harga: dto.harga,
-        stok: isTitipan ? (dto.stokHarian ?? dto.stok ?? 0) : (dto.stok ?? 0),
+        stok: isTitipan ? stokTitipan : (dto.stok ?? 0),
         kategori: dto.kategori.trim(),
         jenis_kemasan: dto.jenisKemasan ?? null,
         is_active: true,
@@ -177,17 +178,30 @@ export class ProdukService {
   // ── 6. UPDATE produk ──────────────────────────────────────────────────────
   async updateProduk(kantinId: number, produkId: number, dto: UpdateProdukDto): Promise<ProdukResponse> {
     const supabase = this.supabaseService.getClient();
-    await this.verifyOwner(kantinId, produkId);
+    const existing = await this.verifyOwner(kantinId, produkId);
+    const nextIsTitipan = dto.isTitipan ?? existing.is_titipan ?? false;
 
     const upd: Record<string, any> = { updated_at: new Date().toISOString() };
     if (dto.nama !== undefined) upd.nama = dto.nama.trim();
     if (dto.harga !== undefined) upd.harga = dto.harga;
-    if (dto.stok !== undefined) upd.stok = dto.stok;
     if (dto.kategori !== undefined) upd.kategori = dto.kategori.trim();
     if (dto.jenisKemasan !== undefined) upd.jenis_kemasan = dto.jenisKemasan ?? null;
     if (dto.isActive !== undefined) upd.is_active = dto.isActive;
     if (dto.isTitipan !== undefined) upd.is_titipan = dto.isTitipan;
-    if (dto.stokHarian !== undefined) upd.stok_harian = dto.stokHarian;
+
+    const isTitipanConfigChanged = dto.isTitipan !== undefined && dto.isTitipan !== existing.is_titipan;
+    const isTitipanStockChanged = dto.stok !== undefined || dto.stokHarian !== undefined || isTitipanConfigChanged;
+
+    if (nextIsTitipan) {
+      if (isTitipanStockChanged) {
+        const stokTitipan = dto.stokHarian ?? dto.stok ?? existing.stok_harian ?? existing.stok ?? 0;
+        upd.stok = stokTitipan;
+        upd.stok_harian = stokTitipan;
+      }
+    } else {
+      if (dto.stok !== undefined) upd.stok = dto.stok;
+      if (dto.isTitipan === false) upd.stok_harian = null;
+    }
 
     const { data, error } = await supabase
       .from('produk')
@@ -259,7 +273,7 @@ export class ProdukService {
     const supabase = this.supabaseService.getClient();
     const { data } = await supabase
       .from('produk')
-      .select('id, created_by, is_titipan')
+      .select('id, created_by, is_titipan, stok, stok_harian')
       .eq('id', produkId)
       .maybeSingle();
 

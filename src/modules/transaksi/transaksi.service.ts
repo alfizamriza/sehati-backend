@@ -325,13 +325,17 @@ export class TransaksiService {
     if (!siswa || !siswa.is_active) throw new NotFoundException('Siswa tidak ditemukan atau tidak aktif');
     if (!dto.items || dto.items.length === 0) throw new BadRequestException('Keranjang kosong');
 
-    const produkIds = dto.items.map((i) => i.produkId);
+    const qtyByProdukId = dto.items.reduce<Record<number, number>>((acc, item) => {
+      acc[item.produkId] = (acc[item.produkId] ?? 0) + item.quantity;
+      return acc;
+    }, {});
+    const produkIds = Object.keys(qtyByProdukId).map((id) => Number(id));
 
     // Ambil data produk + pengaturan penalti secara paralel
     const [{ data: produkRows }, penalty] = await Promise.all([
       supabase
         .from('produk')
-        .select('id, nama, harga, stok, jenis_kemasan, is_active')
+        .select('id, nama, harga, stok, jenis_kemasan, is_active, created_by')
         .in('id', produkIds),
       this.getPengaturanPenalty(),
     ]);
@@ -339,11 +343,15 @@ export class TransaksiService {
     const produkMap: Record<number, {
       id: number; nama: string; harga: number;
       stok: number; jenisKemasan: string | null;
+      isActive: boolean; createdBy: number | null;
     }> = {};
     (produkRows ?? []).forEach((p) => {
       produkMap[p.id] = {
         id: p.id, nama: p.nama, harga: p.harga,
-        stok: p.stok, jenisKemasan: p.jenis_kemasan ?? null,
+        stok: p.stok,
+        jenisKemasan: p.jenis_kemasan ?? null,
+        isActive: p.is_active ?? false,
+        createdBy: p.created_by ?? null,
       };
     });
 
@@ -352,8 +360,20 @@ export class TransaksiService {
     for (const item of dto.items) {
       const p = produkMap[item.produkId];
       if (!p) throw new BadRequestException(`Produk ID ${item.produkId} tidak ditemukan`);
-      if (p.stok < item.quantity) throw new BadRequestException(`Stok ${p.nama} tidak cukup (sisa: ${p.stok})`);
+      if (Number(p.createdBy) !== Number(kantinId)) {
+        throw new BadRequestException(`Produk ${p.nama} bukan milik kantin ini`);
+      }
+      if (!p.isActive) {
+        throw new BadRequestException(`Produk ${p.nama} sedang tidak aktif`);
+      }
       totalHarga += p.harga * item.quantity;
+    }
+
+    for (const [produkIdRaw, quantity] of Object.entries(qtyByProdukId)) {
+      const produkId = Number(produkIdRaw);
+      const p = produkMap[produkId];
+      if (!p) throw new BadRequestException(`Produk ID ${produkId} tidak ditemukan`);
+      if (p.stok < quantity) throw new BadRequestException(`Stok ${p.nama} tidak cukup (sisa: ${p.stok})`);
     }
 
     // ── Hitung penalti / reward kemasan (BYOC) ──────────────────────────────
@@ -473,12 +493,18 @@ export class TransaksiService {
     if (errDetail) throw new BadRequestException(`Gagal menyimpan detail: ${errDetail.message}`);
 
     // ── Update stok produk ─────────────────────────────────────────────────
-    for (const item of dto.items) {
-      const p = produkMap[item.produkId];
-      await supabase
+    for (const [produkIdRaw, quantity] of Object.entries(qtyByProdukId)) {
+      const produkId = Number(produkIdRaw);
+      const p = produkMap[produkId];
+      const { error: stokError } = await supabase
         .from('produk')
-        .update({ stok: p.stok - item.quantity, updated_at: new Date().toISOString() })
-        .eq('id', item.produkId);
+        .update({ stok: p.stok - quantity, updated_at: new Date().toISOString() })
+        .eq('id', produkId)
+        .eq('created_by', kantinId);
+
+      if (stokError) {
+        throw new BadRequestException(`Gagal mengurangi stok ${p.nama}: ${stokError.message}`);
+      }
     }
 
     // ── Update coins siswa ─────────────────────────────────────────────────

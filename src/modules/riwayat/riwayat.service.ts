@@ -34,6 +34,7 @@ export interface RiwayatBelanja {
   coinsReward: number;
   coinsPenalty: number;
   paymentMethod: string;
+  isByoc: boolean;           // ← tambah field ini
   items: DetailBelanja[];
   adaProdukPlastik: boolean;
   jumlahItemPlastik: number;
@@ -63,7 +64,8 @@ export interface RiwayatSummary {
   totalPelanggaran: number;
   totalCoinsDidapat: number;
   totalCoinsKeluar: number;
-  jumlahPlastik: number;
+  jumlahPlastik: number;      // plastik NON-BYOC
+  jumlahPlastikByoc: number;  // plastik BYOC (bawa wadah sendiri)
 }
 
 @Injectable()
@@ -82,7 +84,7 @@ export class RiwayatService {
         .eq('nis', nisStr),
       supabase
         .from('transaksi')
-        .select('id, coins_used, coins_reward, coins_penalty')
+        .select('id, coins_used, coins_reward, coins_penalty, is_byoc')
         .eq('nis', nisStr),
       supabase
         .from('pelanggaran')
@@ -95,27 +97,61 @@ export class RiwayatService {
     const belanjaRows: any[] = (belanjaRes.data ?? []) as any[];
     const pelanggaranRows: any[] = (pelanggaranRes.data ?? []) as any[];
 
-    // Coins masuk: tumbler reward + streak + coins_reward dari transaksi
     const totalCoinsDidapat =
       tumblerRows.reduce((s, r) => s + (r.coins_reward ?? 0) + (r.streak_bonus ?? 0), 0) +
       belanjaRows.reduce((s, r) => s + (r.coins_reward ?? 0), 0);
 
-    // Coins keluar: coins_used + coins_penalty transaksi + penalty pelanggaran
     const totalCoinsKeluar =
       belanjaRows.reduce((s, r) => s + (r.coins_used ?? 0) + Math.abs(r.coins_penalty ?? 0), 0) +
       pelanggaranRows.reduce((s, r) => s + Math.abs(r.coins_penalty ?? 0), 0);
 
-    // Hitung jumlah item plastik dari detail_transaksi
+    // Ambil detail produk — sekarang juga ambil is_byoc dari transaksi
     let jumlahPlastik = 0;
+    let jumlahPlastikByoc = 0;
+
     const transaksiIds = belanjaRows.map((t) => t.id).filter(Boolean);
     if (transaksiIds.length > 0) {
+      // Step 1: ambil detail_transaksi — hanya kolom yang ada di tabel ini
       const { data: detailRows } = await supabase
         .from('detail_transaksi')
-        .select('quantity, produk:produk_id (jenis_kemasan)')
+        .select('transaksi_id, produk_id, quantity')
         .in('transaksi_id', transaksiIds);
-      (detailRows ?? []).forEach((d: any) => {
-        const p = Array.isArray(d.produk) ? d.produk[0] : d.produk;
-        if (p?.jenis_kemasan === 'plastik') jumlahPlastik += d.quantity ?? 1;
+
+      const details: any[] = detailRows ?? [];
+
+      // Step 2: ambil jenis_kemasan dari tabel produk secara terpisah
+      const produkIds = [...new Set(details.map((d) => String(d.produk_id)).filter(Boolean))];
+      const produkJenisMap = new Map<string, string>(); // produk_id → jenis_kemasan
+
+      if (produkIds.length > 0) {
+        const { data: produkRows } = await supabase
+          .from('produk')
+          .select('id, jenis_kemasan')
+          .in('id', produkIds);
+
+        (produkRows ?? []).forEach((p: any) => {
+          produkJenisMap.set(String(p.id), p.jenis_kemasan ?? 'tanpa_kemasan');
+        });
+      }
+
+      // Step 3: map transaksi_id → is_byoc dari belanjaRows
+      const byocMap = new Map<string, boolean>(
+        belanjaRows.map((t) => [String(t.id), Boolean(t.is_byoc)]),
+      );
+
+      // Step 4: hitung plastik, pisahkan BYOC vs non-BYOC
+      details.forEach((d: any) => {
+        const jenis = produkJenisMap.get(String(d.produk_id)) ?? 'tanpa_kemasan';
+        if (jenis !== 'plastik') return;
+
+        const isByoc = byocMap.get(String(d.transaksi_id)) ?? false;
+        const qty = d.quantity ?? 1;
+
+        if (isByoc) {
+          jumlahPlastikByoc += qty; // pakai wadah sendiri → bukan pelanggaran
+        } else {
+          jumlahPlastik += qty;     // tidak pakai wadah → pelanggaran
+        }
       });
     }
 
@@ -125,7 +161,8 @@ export class RiwayatService {
       totalPelanggaran: pelanggaranRows.length,
       totalCoinsDidapat,
       totalCoinsKeluar,
-      jumlahPlastik,
+      jumlahPlastik,      // hanya transaksi NON-BYOC
+      jumlahPlastikByoc,  // transaksi BYOC (info saja, bukan pelanggaran)
     };
   }
 
@@ -146,18 +183,14 @@ export class RiwayatService {
     const rows: any[] = (rawRows ?? []) as any[];
     if (rows.length === 0) return [];
 
-    // Nama guru
     const nips = [...new Set(rows.map((r) => r.nip).filter(Boolean))];
     const guruMap: Record<string, string> = {};
     if (nips.length > 0) {
       const { data: guruRows } = await supabase
-        .from('guru')
-        .select('nip, nama')
-        .in('nip', nips);
+        .from('guru').select('nip, nama').in('nip', nips);
       (guruRows ?? []).forEach((g: any) => { guruMap[String(g.nip)] = g.nama; });
     }
 
-    // Kelas siswa
     let kelasLabel = '-';
     const { data: siswaData } = await supabase
       .from('siswa')
@@ -189,7 +222,12 @@ export class RiwayatService {
 
     const { data: rawTrx, error } = await supabase
       .from('transaksi')
-      .select('id, kode_transaksi, created_at, total_harga, total_diskon, total_bayar, coins_used, payment_method, coins_reward, coins_penalty')
+      .select(`
+        id, kode_transaksi, created_at,
+        total_harga, total_diskon, total_bayar,
+        coins_used, payment_method, coins_reward, coins_penalty,
+        is_byoc
+      `)
       .eq('nis', nisStr)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -198,41 +236,62 @@ export class RiwayatService {
     const transaksiRows: any[] = (rawTrx ?? []) as any[];
     if (transaksiRows.length === 0) return [];
 
-    // Detail produk per transaksi
     const ids = transaksiRows.map((t) => t.id).filter(Boolean);
+
+    // Step 1: ambil detail_transaksi — kolom yang tersedia di tabel ini
     const { data: rawDetail } = await supabase
       .from('detail_transaksi')
-      .select('transaksi_id, nama_produk, quantity, harga_satuan, subtotal, produk:produk_id (jenis_kemasan)')
+      .select('transaksi_id, produk_id, nama_produk, quantity, harga_satuan, subtotal')
       .in('transaksi_id', ids);
 
+    const allDetails: any[] = rawDetail ?? [];
+
+    // Step 2: ambil jenis_kemasan dari tabel produk secara terpisah
+    const produkIds = [...new Set(allDetails.map((d) => String(d.produk_id)).filter(Boolean))];
+    const produkJenisMap = new Map<string, string>(); // produk_id → jenis_kemasan
+
+    if (produkIds.length > 0) {
+      const { data: produkRows } = await supabase
+        .from('produk')
+        .select('id, jenis_kemasan')
+        .in('id', produkIds);
+
+      (produkRows ?? []).forEach((p: any) => {
+        produkJenisMap.set(String(p.id), p.jenis_kemasan ?? 'tanpa_kemasan');
+      });
+    }
+
+    // Step 3: kelompokkan detail per transaksi
     const detailMap: Record<string, any[]> = {};
-    ((rawDetail ?? []) as any[]).forEach((d: any) => {
+    allDetails.forEach((d: any) => {
       if (!detailMap[d.transaksi_id]) detailMap[d.transaksi_id] = [];
       detailMap[d.transaksi_id].push(d);
     });
 
     return transaksiRows.map((t) => {
+      const isByoc = Boolean(t.is_byoc);
       const details = detailMap[t.id] ?? [];
-      const items: DetailBelanja[] = details.map((d: any) => {
-        const prod = d.produk
-          ? (Array.isArray(d.produk) ? d.produk[0] : d.produk)
-          : null;
-        return {
-          namaProduk: d.nama_produk ?? 'Produk',
-          harga: d.harga_satuan ?? 0,
-          qty: d.quantity ?? 1,
-          subtotal: d.subtotal ?? 0,
-          jenisKemasan: prod?.jenis_kemasan ?? 'tanpa_kemasan',
-        };
-      });
 
-      const jumlahItemPlastik = items.filter((i) => i.jenisKemasan === 'plastik').length;
+      const items: DetailBelanja[] = details.map((d: any) => ({
+        namaProduk: d.nama_produk ?? 'Produk',
+        harga: d.harga_satuan ?? 0,
+        qty: d.quantity ?? 1,
+        subtotal: d.subtotal ?? 0,
+        // Ambil jenis_kemasan dari map produk, bukan dari nested join
+        jenisKemasan: produkJenisMap.get(String(d.produk_id)) ?? 'tanpa_kemasan',
+      }));
+
+      // Plastik hanya dianggap "pelanggaran" jika BUKAN BYOC
+      const plastikItems = items.filter((i) => i.jenisKemasan === 'plastik');
+      const jumlahItemPlastik = plastikItems.length;
+      // adaProdukPlastik = true hanya jika ada plastik DAN bukan BYOC
+      const adaProdukPlastik = jumlahItemPlastik > 0 && !isByoc;
+
       const createdAt = t.created_at ?? '-';
       const tanggal = createdAt !== '-' ? createdAt.split('T')[0] : '-';
-      const waktu =
-        createdAt !== '-' && createdAt.includes('T')
-          ? createdAt.split('T')[1]?.substring(0, 8) ?? '00:00:00'
-          : '00:00:00';
+      const waktu = createdAt !== '-' && createdAt.includes('T')
+        ? createdAt.split('T')[1]?.substring(0, 8) ?? '00:00:00'
+        : '00:00:00';
 
       return {
         id: String(t.id),
@@ -247,8 +306,9 @@ export class RiwayatService {
         coinsReward: t.coins_reward ?? 0,
         coinsPenalty: Math.abs(t.coins_penalty ?? 0),
         paymentMethod: t.payment_method ?? '-',
+        isByoc,
         items,
-        adaProdukPlastik: jumlahItemPlastik > 0,
+        adaProdukPlastik,        // false jika BYOC
         jumlahItemPlastik,
         dicatatOleh: '-',
         verifiedAt: null,
@@ -275,26 +335,22 @@ export class RiwayatService {
     const rows: any[] = (rawRows ?? []) as any[];
     if (rows.length === 0) return [];
 
-    // Nama guru
     const nips = [...new Set(rows.map((r) => r.nip).filter(Boolean))];
     const guruMap: Record<string, string> = {};
     if (nips.length > 0) {
       const { data: guruRows } = await supabase
-        .from('guru')
-        .select('nip, nama')
-        .in('nip', nips);
+        .from('guru').select('nip, nama').in('nip', nips);
       (guruRows ?? []).forEach((g: any) => { guruMap[String(g.nip)] = g.nama; });
     }
 
-    // Jenis pelanggaran
     const jenisIds = [...new Set(rows.map((r) => r.jenis_pelanggaran_id).filter(Boolean))];
     const jenisMap: Record<string, { nama: string; kategori: string }> = {};
     if (jenisIds.length > 0) {
       const { data: jenisRows } = await supabase
-        .from('jenis_pelanggaran')
-        .select('id, nama, kategori')
-        .in('id', jenisIds);
-      (jenisRows ?? []).forEach((j: any) => { jenisMap[j.id] = { nama: j.nama, kategori: j.kategori }; });
+        .from('jenis_pelanggaran').select('id, nama, kategori').in('id', jenisIds);
+      (jenisRows ?? []).forEach((j: any) => {
+        jenisMap[j.id] = { nama: j.nama, kategori: j.kategori };
+      });
     }
 
     return rows.map((p) => {
