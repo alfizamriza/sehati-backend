@@ -6,7 +6,7 @@ import {
 export class CreateGuruDto {
   @IsNotEmpty({ message: 'NIP tidak boleh kosong' })
   @IsString()
-  @Length(9, 20, { message: 'NIP harus 9-20 karakter' })
+  @Length(8, 20, { message: 'NIP harus 8-20 karakter' })
   nip!: string;
 
   @IsNotEmpty({ message: 'Nama tidak boleh kosong' })
