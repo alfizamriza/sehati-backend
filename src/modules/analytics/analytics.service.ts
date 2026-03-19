@@ -9,10 +9,17 @@ export interface DateRange {
   end: string;
 }
 
-function toLocalDateString(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+// ─── TIMEZONE HELPER (WIB / Asia/Jakarta) ───────────────────────────────────
+function getWibDate(d: Date = new Date()): Date {
+  const epoch = d.getTime();
+  return new Date(epoch + 7 * 3600 * 1000); // +7 hours for WIB
+}
+
+function toLocalDateStringWib(d: Date): string {
+  const wib = getWibDate(d);
+  const y = wib.getUTCFullYear();
+  const m = String(wib.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(wib.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
 
@@ -45,21 +52,25 @@ function formatTingkat(value: unknown): string {
 }
 
 function getDateRange(period: AnalyticsPeriod, customStart?: string, customEnd?: string): DateRange {
-  const now   = new Date();
-  const today = toLocalDateString(now);
+  const now = new Date();
+  const today = toLocalDateStringWib(now);
   if (period === 'custom' && customStart && customEnd) return { start: customStart, end: customEnd };
   switch (period) {
     case 'today': return { start: today, end: today };
     case 'week': {
-      const d = new Date(now); d.setDate(d.getDate() - 6);
-      return { start: toLocalDateString(d), end: today };
+      // 6 days ago in WIB
+      const wibNow = getWibDate(now);
+      wibNow.setUTCDate(wibNow.getUTCDate() - 6);
+      return { start: toLocalDateStringWib(new Date(wibNow.getTime() - 7 * 3600 * 1000)), end: today };
     }
     case 'month': {
-      const d = new Date(now.getFullYear(), now.getMonth(), 1);
-      return { start: toLocalDateString(d), end: today };
+      const wibNow = getWibDate(now);
+      const startWib = new Date(Date.UTC(wibNow.getUTCFullYear(), wibNow.getUTCMonth(), 1));
+      return { start: toLocalDateStringWib(new Date(startWib.getTime() - 7 * 3600 * 1000)), end: today };
     }
     case 'year': {
-      return { start: `${now.getFullYear()}-01-01`, end: today };
+      const wibNow = getWibDate(now);
+      return { start: `${wibNow.getUTCFullYear()}-01-01`, end: today };
     }
     default: return { start: today, end: today };
   }
@@ -140,12 +151,12 @@ export interface AnalyticsResponse {
 
 @Injectable()
 export class AnalyticsService {
-  constructor(private supabaseService: SupabaseService) {}
+  constructor(private supabaseService: SupabaseService) { }
 
   // ── Helper: format angka ──────────────────────────────────────────────────
   private fmt(n: number): string {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}jt`;
-    if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}rb`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}rb`;
     return String(n);
   }
 
@@ -155,14 +166,14 @@ export class AnalyticsService {
 
   // ── Helper: hitung previous period ───────────────────────────────────────
   private getPrevRange(range: DateRange): DateRange {
-    const start  = new Date(range.start);
-    const end    = new Date(range.end);
-    const days   = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
-    const pEnd   = new Date(start); pEnd.setDate(pEnd.getDate() - 1);
-    const pStart = new Date(pEnd);  pStart.setDate(pStart.getDate() - days + 1);
+    const start = new Date(range.start);
+    const end = new Date(range.end);
+    const days = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+    const pEnd = new Date(start); pEnd.setDate(pEnd.getDate() - 1);
+    const pStart = new Date(pEnd); pStart.setDate(pStart.getDate() - days + 1);
     return {
-      start: toLocalDateString(pStart),
-      end:   toLocalDateString(pEnd),
+      start: toLocalDateStringWib(pStart),
+      end: toLocalDateStringWib(pEnd),
     };
   }
 
@@ -177,21 +188,21 @@ export class AnalyticsService {
     customStart?: string,
     customEnd?: string,
   ): Promise<AnalyticsResponse> {
-    const supabase  = this.supabaseService.getClient();
-    const range     = getDateRange(period, customStart, customEnd);
+    const supabase = this.supabaseService.getClient();
+    const range = getDateRange(period, customStart, customEnd);
     const prevRange = this.getPrevRange(range);
 
-    const startTs     = `${range.start}T00:00:00`;
-    const endTs       = `${range.end}T23:59:59`;
-    const prevStartTs = `${prevRange.start}T00:00:00`;
-    const prevEndTs   = `${prevRange.end}T23:59:59`;
+    const startTs = `${range.start}T00:00:00+07:00`;
+    const endTs = `${range.end}T23:59:59+07:00`;
+    const prevStartTs = `${prevRange.start}T00:00:00+07:00`;
+    const prevEndTs = `${prevRange.end}T23:59:59+07:00`;
 
     // ── Parallel fetch ────────────────────────────────────────────────────
     const [
-      { data: txCur  }, { data: txPrev  },
+      { data: txCur }, { data: txPrev },
       { data: siswaRows },
-      { data: pelCur  }, { data: pelPrev },
-      { data: vouCur  }, { data: vouPrev },
+      { data: pelCur }, { data: pelPrev },
+      { data: vouCur }, { data: vouPrev },
       { data: detailRows },
       { data: kelasRows },
       { data: siswaAllRows },
@@ -222,26 +233,26 @@ export class AnalyticsService {
 
     // ── STAT CARDS ────────────────────────────────────────────────────────
 
-    const curTx      = txCur ?? [];
-    const prevTx     = txPrev ?? [];
-    const allSiswa   = siswaRows ?? [];
-    const curPel     = pelCur ?? [];
-    const prevPel    = pelPrev ?? [];
-    const curVou     = vouCur ?? [];
-    const prevVou    = vouPrev ?? [];
+    const curTx = txCur ?? [];
+    const prevTx = txPrev ?? [];
+    const allSiswa = siswaRows ?? [];
+    const curPel = pelCur ?? [];
+    const prevPel = pelPrev ?? [];
+    const curVou = vouCur ?? [];
+    const prevVou = vouPrev ?? [];
 
-    const totalPendapatan     = curTx.reduce((s: number, t: any)  => s + (t.total_bayar ?? 0), 0);
-    const prevPendapatan      = prevTx.reduce((s: number, t: any) => s + (t.total_bayar ?? 0), 0);
-    const totalCoinsDisalurkan = curTx.reduce((s: number, t: any) => s + (t.coins_used  ?? 0), 0);
-    const totalPelanggaran    = curPel.length;
-    const totalVoucher        = curVou.length;
-    const totalSiswaAktif     = allSiswa.filter((s: any) => s.is_active).length;
-    const rataCoins           = allSiswa.length > 0
+    const totalPendapatan = curTx.reduce((s: number, t: any) => s + (t.total_bayar ?? 0), 0);
+    const prevPendapatan = prevTx.reduce((s: number, t: any) => s + (t.total_bayar ?? 0), 0);
+    const totalCoinsDisalurkan = curTx.reduce((s: number, t: any) => s + (t.coins_used ?? 0), 0);
+    const totalPelanggaran = curPel.length;
+    const totalVoucher = curVou.length;
+    const totalSiswaAktif = allSiswa.filter((s: any) => s.is_active).length;
+    const rataCoins = allSiswa.length > 0
       ? Math.round(allSiswa.reduce((s: number, r: any) => s + (r.coins ?? 0), 0) / allSiswa.length)
       : 0;
 
     // Sparkline: 7-day daily counts
-    const sparklineTx  = await this.getSparkline(supabase, 'transaksi', 'id', 'created_at', 7);
+    const sparklineTx = await this.getSparkline(supabase, 'transaksi', 'id', 'created_at', 7);
     const sparklinePel = await this.getSparkline(supabase, 'pelanggaran', 'id', 'created_at', 7);
 
     const stats: StatCard[] = [
@@ -293,9 +304,10 @@ export class AnalyticsService {
     // ── HEATMAP PELANGGARAN (hari × jam) ────────────────────────────────────
     const heatGrid = Array.from({ length: 7 }, () => Array(24).fill(0));
     curPel.forEach((p: any) => {
-      const dt   = new Date(p.created_at);
-      const hour = dt.getHours();
-      const day  = (dt.getDay() + 6) % 7; // convert: Mon=0 ... Sun=6
+      const dt = new Date(p.created_at);
+      const wibDt = getWibDate(dt);
+      const hour = wibDt.getUTCHours();
+      const day = (wibDt.getUTCDay() + 6) % 7; // convert: Mon=0 ... Sun=6
       heatGrid[day][hour] += 1;
     });
     const heatmapPelanggaran = heatGrid.flatMap((row, day) =>
@@ -325,9 +337,9 @@ export class AnalyticsService {
       if ((t.coins_used ?? 0) > 0) methodCount.coins += 1;
     });
     const donutMetodeBayar: DonutSlice[] = [
-      { name: 'Tunai',   value: methodCount.tunai   ?? 0, color: '#10b981' },
+      { name: 'Tunai', value: methodCount.tunai ?? 0, color: '#10b981' },
       { name: 'Voucher', value: methodCount.voucher ?? 0, color: '#8B5CF6' },
-      { name: 'Koin',    value: methodCount.coins   ?? 0, color: '#F59E0B' },
+      { name: 'Koin', value: methodCount.coins ?? 0, color: '#F59E0B' },
     ].filter(d => d.value > 0);
 
     // ── DONUT: Kemasan (dari detail produk + produk table) ────────────────
@@ -337,13 +349,13 @@ export class AnalyticsService {
     const topSiswa: RankingItem[] = (siswaAllRows ?? [])
       .slice(0, 8)
       .map((s: any, i: number) => ({
-        rank:           i + 1,
-        id:             s.nis,
-        name:           s.nama,
-        sub:            kelasMap[s.kelas_id] ?? '-',
-        value:          s.coins ?? 0,
-        valueLabel:     `${(s.coins ?? 0).toLocaleString('id-ID')} koin`,
-        avatarInitials: s.nama?.split(' ').slice(0,2).map((w: string) => w[0]).join('').toUpperCase() ?? '??',
+        rank: i + 1,
+        id: s.nis,
+        name: s.nama,
+        sub: kelasMap[s.kelas_id] ?? '-',
+        value: s.coins ?? 0,
+        valueLabel: `${(s.coins ?? 0).toLocaleString('id-ID')} koin`,
+        avatarInitials: s.nama?.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() ?? '??',
       }));
 
     // ── TOP PRODUK ────────────────────────────────────────────────────────
@@ -379,14 +391,16 @@ export class AnalyticsService {
     const queries = Array.from({ length: days }, (_, index) => {
       const offset = days - 1 - index;
       const d = new Date();
-      d.setDate(d.getDate() - offset);
-      const date = toLocalDateString(d);
+      // Use getWibDate to properly subtract days in WIB timezone
+      const wibD = getWibDate(d);
+      wibD.setUTCDate(wibD.getUTCDate() - offset);
+      const date = toLocalDateStringWib(new Date(wibD.getTime() - 7 * 3600 * 1000));
 
       return supabase
         .from(table)
         .select(countCol, { count: 'exact', head: true })
-        .gte(dateCol, `${date}T00:00:00`)
-        .lte(dateCol, `${date}T23:59:59`);
+        .gte(dateCol, `${date}T00:00:00+07:00`)
+        .lte(dateCol, `${date}T23:59:59+07:00`);
     });
 
     const results = await Promise.all(queries);
@@ -400,8 +414,8 @@ export class AnalyticsService {
     totalSiswaAktif: number,
   ): Promise<TrendPoint[]> {
     const start = new Date(range.start);
-    const end   = new Date(range.end);
-    const days  = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+    const end = new Date(range.end);
+    const days = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
 
     // Kalau > 60 hari → aggregate per minggu
     const points: TrendPoint[] = [];
@@ -415,18 +429,18 @@ export class AnalyticsService {
       supabase
         .from('transaksi')
         .select('created_at,coins_used')
-        .gte('created_at', `${range.start}T00:00:00`)
-        .lte('created_at', `${range.end}T23:59:59`),
+        .gte('created_at', `${range.start}T00:00:00+07:00`)
+        .lte('created_at', `${range.end}T23:59:59+07:00`),
       supabase
         .from('pelanggaran')
         .select('created_at')
-        .gte('created_at', `${range.start}T00:00:00`)
-        .lte('created_at', `${range.end}T23:59:59`),
+        .gte('created_at', `${range.start}T00:00:00+07:00`)
+        .lte('created_at', `${range.end}T23:59:59+07:00`),
       supabase
         .from('detail_transaksi')
         .select('quantity,produk:produk_id(jenis_kemasan),transaksi:transaksi_id(created_at)')
-        .gte('transaksi.created_at', `${range.start}T00:00:00`)
-        .lte('transaksi.created_at', `${range.end}T23:59:59`),
+        .gte('transaksi.created_at', `${range.start}T00:00:00+07:00`)
+        .lte('transaksi.created_at', `${range.end}T23:59:59+07:00`),
     ]);
 
     const transaksiRows = txRows ?? [];
@@ -434,13 +448,16 @@ export class AnalyticsService {
     const detailRows = detRows ?? [];
 
     for (let i = 0; i < days; i += step) {
-      const d      = new Date(start); d.setDate(d.getDate() + i);
-      const dEnd   = new Date(d); dEnd.setDate(dEnd.getDate() + step - 1);
-      const ds     = toLocalDateString(d);
-      const de     = toLocalDateString(dEnd);
+      const wibD = getWibDate(start);
+      wibD.setUTCDate(wibD.getUTCDate() + i);
+      const wibDEnd = getWibDate(wibD);
+      wibDEnd.setUTCDate(wibDEnd.getUTCDate() + step - 1);
 
-      const startWindow = new Date(`${ds}T00:00:00`).getTime();
-      const endWindow = new Date(`${de}T23:59:59`).getTime();
+      const ds = toLocalDateStringWib(new Date(wibD.getTime() - 7 * 3600 * 1000));
+      const de = toLocalDateStringWib(new Date(wibDEnd.getTime() - 7 * 3600 * 1000));
+
+      const startWindow = new Date(`${ds}T00:00:00+07:00`).getTime();
+      const endWindow = new Date(`${de}T23:59:59+07:00`).getTime();
 
       const txDay = transaksiRows.filter((tx: any) => {
         const ts = new Date(tx.created_at).getTime();
@@ -472,12 +489,12 @@ export class AnalyticsService {
         : `${new Date(ds).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}`;
 
       points.push({
-        date:         label,
-        transaksi:    txDay.length,
+        date: label,
+        transaksi: txDay.length,
         kemasanPlastik,
         kemasanKertas,
-        pelanggaran:  pelDay.length,
-        siswaAktif:   totalSiswaAktif,
+        pelanggaran: pelDay.length,
+        siswaAktif: totalSiswaAktif,
       });
     }
     return points;
@@ -493,8 +510,8 @@ export class AnalyticsService {
     const { data: detRows } = await supabase
       .from('detail_transaksi')
       .select('produk_id,quantity,transaksi:transaksi_id(created_at)')
-      .gte('transaksi.created_at', `${range.start}T00:00:00`)
-      .lte('transaksi.created_at', `${range.end}T23:59:59`);
+      .gte('transaksi.created_at', `${range.start}T00:00:00+07:00`)
+      .lte('transaksi.created_at', `${range.end}T23:59:59+07:00`);
 
     const counts: Record<string, number> = {};
     (detRows ?? []).forEach((d: any) => {
@@ -503,15 +520,15 @@ export class AnalyticsService {
     });
 
     const colorMap: Record<string, string> = {
-      plastik:       '#EF4444',
-      kertas:        '#F59E0B',
+      plastik: '#EF4444',
+      kertas: '#F59E0B',
       tanpa_kemasan: '#10b981',
     };
     const labelMap: Record<string, string> = {
       plastik: 'Plastik', kertas: 'Kertas', tanpa_kemasan: 'Tanpa Kemasan',
     };
     return Object.entries(counts).map(([k, v]) => ({
-      name:  labelMap[k] ?? k,
+      name: labelMap[k] ?? k,
       value: v,
       color: colorMap[k] ?? '#64748b',
     }));
@@ -526,25 +543,25 @@ export class AnalyticsService {
   ): Promise<ClassProgress[]> {
     const { data: pelRows } = await supabase
       .from('pelanggaran').select('nis,created_at')
-      .gte('created_at', `${range.start}T00:00:00`)
-      .lte('created_at', `${range.end}T23:59:59`);
+      .gte('created_at', `${range.start}T00:00:00+07:00`)
+      .lte('created_at', `${range.end}T23:59:59+07:00`);
 
     const pelByNis: Record<string, number> = {};
     (pelRows ?? []).forEach((p: any) => { pelByNis[p.nis] = (pelByNis[p.nis] ?? 0) + 1; });
 
     return kelasRows.map((k: any) => {
-      const siswaKelas  = allSiswa.filter((s: any) => s.kelas_id === k.id);
-      const pelanggar   = siswaKelas.filter((s: any) => pelByNis[s.nis] > 0).length;
-      const total       = siswaKelas.length || 1;
-      const coinsRata   = siswaKelas.length > 0
+      const siswaKelas = allSiswa.filter((s: any) => s.kelas_id === k.id);
+      const pelanggar = siswaKelas.filter((s: any) => pelByNis[s.nis] > 0).length;
+      const total = siswaKelas.length || 1;
+      const coinsRata = siswaKelas.length > 0
         ? Math.round(siswaKelas.reduce((s, r: any) => s + (r.coins ?? 0), 0) / siswaKelas.length)
         : 0;
       return {
-        id:           k.id,
-        name:         k.nama,
-        tingkat:      formatTingkat(k.tingkat),
+        id: k.id,
+        name: k.nama,
+        tingkat: formatTingkat(k.tingkat),
         kepatuhanPct: Math.round(((total - pelanggar) / total) * 100),
-        totalSiswa:   siswaKelas.length,
+        totalSiswa: siswaKelas.length,
         pelanggar,
         coinsRata,
       };
@@ -564,8 +581,8 @@ export class AnalyticsService {
       .from('login_audit_log')
       .select('role, actor_user_id, actor_identifier, actor_name, status, login_at')
       .eq('status', 'success')
-      .gte('login_at', `${range.start}T00:00:00`)
-      .lte('login_at', `${range.end}T23:59:59`);
+      .gte('login_at', `${range.start}T00:00:00+07:00`)
+      .lte('login_at', `${range.end}T23:59:59+07:00`);
 
     if (error) {
       console.warn('[AnalyticsService] Login audit analytics dilewati:', error.message);
@@ -605,8 +622,9 @@ export class AnalyticsService {
       const loginAt = row?.login_at ? new Date(row.login_at) : null;
       if (!loginAt || Number.isNaN(loginAt.getTime())) return;
 
-      const day = (loginAt.getDay() + 6) % 7;
-      const hour = loginAt.getHours();
+      const wibDt = new Date(loginAt.getTime() + 7 * 3600 * 1000);
+      const day = (wibDt.getUTCDay() + 6) % 7;
+      const hour = wibDt.getUTCHours();
       const actorKey = String(row.actor_user_id ?? row.actor_identifier ?? '').trim();
       if (!actorKey) return;
 
