@@ -13,6 +13,13 @@ export interface LeaderboardSiswaRow {
   streak: number;
   is_me: boolean;
   fotoUrl: string | null;
+  showcaseNote: {
+    achievementId: number;
+    achievementName: string;
+    achievementIcon: string;
+    achievementBadgeColor: string;
+    noteText: string | null;
+  } | null;
 }
 
 export interface LeaderboardKelasRow {
@@ -315,15 +322,83 @@ export class LeaderboardService {
     });
   }
 
-  private buildSiswaLeaderboard(
+  private async getShowcaseNoteMap(
+    nisList: string[],
+  ): Promise<
+    Map<
+      string,
+      {
+        achievementId: number;
+        achievementName: string;
+        achievementIcon: string;
+        achievementBadgeColor: string;
+        noteText: string | null;
+      }
+    >
+  > {
+    if (!nisList.length) return new Map();
+
+    const client = this.supabaseService.getClient();
+    const { data, error } = await client
+      .from('achievement_showcase_note')
+      .select(`
+        nis,
+        achievement_id,
+        note_text,
+        expires_at,
+        achievement:achievement_id (
+          id, nama, icon, badge_color
+        )
+      `)
+      .in('nis', nisList)
+      .eq('is_active', true)
+      .gt('expires_at', new Date().toISOString());
+
+    if (error) {
+      throw new BadRequestException(
+        `Gagal mengambil catatan showcase: ${error.message}`,
+      );
+    }
+
+    const map = new Map<string, {
+      achievementId: number;
+      achievementName: string;
+      achievementIcon: string;
+      achievementBadgeColor: string;
+      noteText: string | null;
+    }>();
+
+    (data ?? []).forEach((row: any) => {
+      const achievement = Array.isArray(row.achievement)
+        ? row.achievement[0]
+        : row.achievement;
+      map.set(String(row.nis), {
+        achievementId: Number(row.achievement_id ?? achievement?.id ?? 0),
+        achievementName: achievement?.nama ?? '-',
+        achievementIcon: achievement?.icon ?? '🏆',
+        achievementBadgeColor: achievement?.badge_color ?? 'blue',
+        noteText:
+          typeof row.note_text === 'string' && row.note_text.trim().length > 0
+            ? row.note_text.trim()
+            : null,
+      });
+    });
+
+    return map;
+  }
+
+  private async buildSiswaLeaderboard(
     siswaRows: SiswaRow[],
     kelasMap: Map<string, KelasRow>,
     nisLogin?: string,
-  ): LeaderboardSiswaRow[] {
+  ): Promise<LeaderboardSiswaRow[]> {
     const sorted = this.rank(
       siswaRows,
       (r) => Number(r.coins ?? 0),
       (r) => String(r.nama ?? ''),
+    );
+    const showcaseMap = await this.getShowcaseNoteMap(
+      sorted.map((row) => row.nis),
     );
 
     return sorted.map((r, idx) => {
@@ -341,6 +416,7 @@ export class LeaderboardService {
         streak: Number(r.streak ?? 0),
         is_me: Boolean(nisLogin && r.nis === nisLogin),
         fotoUrl: r.foto_url ?? null,
+        showcaseNote: showcaseMap.get(r.nis) ?? null,
       };
     });
   }

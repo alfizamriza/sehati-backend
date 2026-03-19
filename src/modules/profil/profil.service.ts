@@ -46,10 +46,22 @@ export interface ProfilVoucher {
   usedAt: string | null;
 }
 
+export interface ProfilShowcaseNote {
+  id: string;
+  achievementId: number;
+  achievementName: string;
+  achievementIcon: string;
+  achievementBadgeColor: string;
+  noteText: string | null;
+  expiresAt: string | null;
+  createdAt: string | null;
+}
+
 export interface ProfilResponse {
   profil: ProfilSiswa;
   achievements: ProfilAchievement[];
   vouchers: ProfilVoucher[];
+  showcaseNote: ProfilShowcaseNote | null;
 }
 
 export interface UpdateFotoDto {
@@ -204,6 +216,45 @@ export class ProfilService {
       };
     });
 
+    const { data: showcaseRow } = await supabase
+      .from('achievement_showcase_note')
+      .select(`
+        id,
+        achievement_id,
+        note_text,
+        expires_at,
+        created_at,
+        achievement:achievement_id (
+          id, nama, icon, badge_color
+        )
+      `)
+      .eq('nis', nisStr)
+      .eq('is_active', true)
+      .gt('expires_at', new Date().toISOString())
+      .maybeSingle();
+
+    const showcaseAchievement = Array.isArray(showcaseRow?.achievement)
+      ? showcaseRow.achievement[0]
+      : showcaseRow?.achievement;
+    const showcaseNote: ProfilShowcaseNote | null = showcaseRow
+      ? {
+          id: String(showcaseRow.id ?? ''),
+          achievementId: Number(
+            showcaseRow.achievement_id ?? showcaseAchievement?.id ?? 0,
+          ),
+          achievementName: showcaseAchievement?.nama ?? '-',
+          achievementIcon: showcaseAchievement?.icon ?? '🏆',
+          achievementBadgeColor: showcaseAchievement?.badge_color ?? 'blue',
+          noteText:
+            typeof showcaseRow.note_text === 'string' &&
+            showcaseRow.note_text.trim().length > 0
+              ? showcaseRow.note_text.trim()
+              : null,
+          expiresAt: showcaseRow.expires_at ?? null,
+          createdAt: showcaseRow.created_at ?? null,
+        }
+      : null;
+
     // Update status kadaluarsa di database (non-blocking)
     if (expireIds.length > 0) {
       supabase
@@ -234,6 +285,7 @@ export class ProfilService {
       },
       achievements,
       vouchers,
+      showcaseNote,
     };
   }
 

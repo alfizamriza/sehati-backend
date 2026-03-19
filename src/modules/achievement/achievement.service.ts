@@ -1,12 +1,48 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { SupabaseService } from 'src/supabase/supabase.service';
+import { UpsertShowcaseNoteDto } from './dto/upsert-showcase-note.dto';
 
 // Validity voucher dari achievement: 30 hari dari unlock
 const VOUCHER_VALIDITY_DAYS = 90;
 
+export interface AchievementShowcaseNote {
+  id: string;
+  nis: string;
+  achievementId: number;
+  achievementName: string;
+  achievementIcon: string;
+  achievementBadgeColor: string;
+  noteText: string | null;
+  expiresAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 @Injectable()
 export class AchievementService {
   constructor(private supabaseService: SupabaseService) {}
+
+  private mapShowcaseNote(row: any): AchievementShowcaseNote {
+    const achievement = Array.isArray(row?.achievement)
+      ? row.achievement[0]
+      : row?.achievement;
+
+    return {
+      id: String(row?.id ?? ''),
+      nis: String(row?.nis ?? ''),
+      achievementId: Number(row?.achievement_id ?? achievement?.id ?? 0),
+      achievementName: achievement?.nama ?? '-',
+      achievementIcon: achievement?.icon ?? '🏆',
+      achievementBadgeColor: achievement?.badge_color ?? 'blue',
+      noteText:
+        typeof row?.note_text === 'string' && row.note_text.trim().length > 0
+          ? row.note_text.trim()
+          : null,
+      expiresAt: row?.expires_at ?? null,
+      createdAt: row?.created_at ?? null,
+      updatedAt: row?.updated_at ?? null,
+    };
+  }
 
   // =====================================================
   // CHECK & UNLOCK ACHIEVEMENTS
@@ -327,5 +363,141 @@ export class AchievementService {
       .order('unlocked_at', { ascending: false });
 
     return { success: true, message: 'OK', data: data || [] };
+  }
+
+  async getShowcaseOptions(nis: string) {
+    const unlocked = await this.getUnlockedAchievements(nis);
+
+    return {
+      success: true,
+      message: 'OK',
+      data: (unlocked.data || []).map((ua: any) => {
+        const ach = Array.isArray(ua.achievement) ? ua.achievement[0] : ua.achievement;
+        return {
+          achievementId: Number(ach?.id ?? 0),
+          nama: ach?.nama ?? '-',
+          deskripsi: ach?.deskripsi ?? null,
+          icon: ach?.icon ?? '🏆',
+          badgeColor: ach?.badge_color ?? 'blue',
+          unlockedAt: ua?.unlocked_at ?? null,
+        };
+      }),
+    };
+  }
+
+  async getActiveShowcaseNote(nis: string) {
+    const supabase = this.supabaseService.getClient();
+
+    const { data, error } = await supabase
+      .from('achievement_showcase_note')
+      .select(`
+        id,
+        nis,
+        achievement_id,
+        note_text,
+        expires_at,
+        created_at,
+        updated_at,
+        achievement:achievement_id (
+          id, nama, icon, badge_color
+        )
+      `)
+      .eq('nis', nis)
+      .eq('is_active', true)
+      .gt('expires_at', new Date().toISOString())
+      .maybeSingle();
+
+    if (error || !data) {
+      return { success: true, message: 'OK', data: null };
+    }
+
+    return {
+      success: true,
+      message: 'OK',
+      data: this.mapShowcaseNote(data),
+    };
+  }
+
+  async upsertShowcaseNote(nis: string, dto: UpsertShowcaseNoteDto) {
+    const supabase = this.supabaseService.getClient();
+    const achievementId = Number(dto?.achievementId ?? 0);
+    const noteText =
+      typeof dto?.noteText === 'string' && dto.noteText.trim().length > 0
+        ? dto.noteText.trim().slice(0, 100)
+        : null;
+
+    if (!achievementId) {
+      throw new BadRequestException('Achievement harus dipilih');
+    }
+
+    const { data: ownership, error: ownershipError } = await supabase
+      .from('user_achievement')
+      .select('achievement_id')
+      .eq('nis', nis)
+      .eq('achievement_id', achievementId)
+      .maybeSingle();
+
+    if (ownershipError || !ownership) {
+      throw new BadRequestException(
+        'Achievement tidak ditemukan pada akun siswa ini',
+      );
+    }
+
+    const nowIso = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const payload = {
+      nis,
+      achievement_id: achievementId,
+      note_text: noteText,
+      is_active: true,
+      expires_at: expiresAt,
+      updated_at: nowIso,
+    };
+
+    const { data, error } = await supabase
+      .from('achievement_showcase_note')
+      .upsert(payload, { onConflict: 'nis' })
+      .select(`
+        id,
+        nis,
+        achievement_id,
+        note_text,
+        expires_at,
+        created_at,
+        updated_at,
+        achievement:achievement_id (
+          id, nama, icon, badge_color
+        )
+      `)
+      .single();
+
+    if (error) {
+      throw new BadRequestException(
+        `Gagal menyimpan catatan showcase: ${error.message}`,
+      );
+    }
+
+    return {
+      success: true,
+      message: 'Catatan showcase berhasil disimpan',
+      data: this.mapShowcaseNote(data),
+    };
+  }
+
+  async removeShowcaseNote(nis: string) {
+    const supabase = this.supabaseService.getClient();
+
+    const { error } = await supabase
+      .from('achievement_showcase_note')
+      .delete()
+      .eq('nis', nis);
+
+    if (error) {
+      throw new BadRequestException(
+        `Gagal menghapus catatan showcase: ${error.message}`,
+      );
+    }
+
+    return { success: true, message: 'Catatan showcase berhasil dihapus' };
   }
 }
