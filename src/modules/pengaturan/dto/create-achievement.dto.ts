@@ -5,6 +5,7 @@ import {
 
 const TIPE_VALUES = ['streak', 'coins', 'tumbler', 'pelanggaran', 'transaksi'] as const;
 const VOUCHER_TIPE_VALUES = ['percentage', 'fixed'] as const;
+const PELANGGARAN_MODE_VALUES = ['count', 'no_violation_days'] as const;
 
 export class CreateAchievementDto {
   @IsString()
@@ -23,6 +24,18 @@ export class CreateAchievementDto {
   @IsInt()
   @Min(0)
   target_value: number;
+
+  @ValidateIf((o) => o.tipe === 'pelanggaran')
+  @IsString()
+  @IsIn(PELANGGARAN_MODE_VALUES)
+  @IsOptional()
+  pelanggaran_mode?: (typeof PELANGGARAN_MODE_VALUES)[number];
+
+  @ValidateIf((o) => o.tipe === 'pelanggaran' && o.pelanggaran_mode === 'no_violation_days')
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  pelanggaran_period_days?: number | null;
 
   @IsString()
   @IsOptional()

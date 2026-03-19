@@ -19,6 +19,7 @@ export interface LeaderboardSiswaRow {
     achievementIcon: string;
     achievementBadgeColor: string;
     noteText: string | null;
+    createdAt: string | null;
   } | null;
 }
 
@@ -333,6 +334,7 @@ export class LeaderboardService {
         achievementIcon: string;
         achievementBadgeColor: string;
         noteText: string | null;
+        createdAt: string | null;
       }
     >
   > {
@@ -345,6 +347,7 @@ export class LeaderboardService {
         nis,
         achievement_id,
         note_text,
+        created_at,
         expires_at,
         achievement:achievement_id (
           id, nama, icon, badge_color
@@ -366,6 +369,7 @@ export class LeaderboardService {
       achievementIcon: string;
       achievementBadgeColor: string;
       noteText: string | null;
+      createdAt: string | null;
     }>();
 
     (data ?? []).forEach((row: any) => {
@@ -381,6 +385,7 @@ export class LeaderboardService {
           typeof row.note_text === 'string' && row.note_text.trim().length > 0
             ? row.note_text.trim()
             : null,
+        createdAt: row.created_at ?? null,
       });
     });
 

@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { SupabaseService } from 'src/supabase/supabase.service';
 import { UpsertShowcaseNoteDto } from './dto/upsert-showcase-note.dto';
+import { analyzeShowcaseNote } from 'src/common/utils/showcase-note-moderation.util';
 
 // Validity voucher dari achievement: 30 hari dari unlock
 const VOUCHER_VALIDITY_DAYS = 90;
@@ -44,6 +45,7 @@ export class AchievementService {
     };
   }
 
+
   // =====================================================
   // CHECK & UNLOCK ACHIEVEMENTS
   // Dipanggil setelah absensi, transaksi, dsb.
@@ -58,7 +60,7 @@ export class AchievementService {
     // 1. Ambil semua achievement aktif untuk tipe ini
     const { data: achievements } = await supabase
       .from('achievement')
-      .select('id, tipe, target_value, coins_reward, voucher_reward, voucher_nominal, voucher_tipe_voucher')
+      .select('id, tipe, target_value, pelanggaran_mode, pelanggaran_period_days, coins_reward, voucher_reward, voucher_nominal, voucher_tipe_voucher')
       .eq('tipe', eventType)
       .eq('is_active', true);
 
@@ -208,6 +210,7 @@ export class AchievementService {
     coins: number;
     tumblerCount: number;
     pelanggaranCount: number;
+    pelanggaranDates: string[];
     transaksiCount: number;
   }> {
     const supabase = this.supabaseService.getClient();
@@ -221,6 +224,7 @@ export class AchievementService {
 
     let tumblerCount = 0;
     let pelanggaranCount = 0;
+    let pelanggaranDates: string[] = [];
     let transaksiCount = 0;
 
     // Ambil data tambahan hanya jika diperlukan
@@ -233,12 +237,15 @@ export class AchievementService {
     }
 
     if (eventType === 'pelanggaran') {
-      const { count } = await supabase
+      const { data } = await supabase
         .from('pelanggaran')
-        .select('id', { count: 'exact', head: true })
+        .select('created_at')
         .eq('nis', nis)
         .eq('status', 'approved');
-      pelanggaranCount = count || 0;
+      pelanggaranDates = (data ?? [])
+        .map((row: any) => row.created_at)
+        .filter((value: unknown) => typeof value === 'string');
+      pelanggaranCount = pelanggaranDates.length;
     }
 
     if (eventType === 'transaksi') {
@@ -254,6 +261,7 @@ export class AchievementService {
       coins: siswa?.coins || 0,
       tumblerCount,
       pelanggaranCount,
+      pelanggaranDates,
       transaksiCount,
     };
   }
@@ -262,12 +270,18 @@ export class AchievementService {
   // CEK ELIGIBILITY
   // =====================================================
   private isEligible(
-    achievement: { tipe: string; target_value: number },
+    achievement: {
+      tipe: string;
+      target_value: number;
+      pelanggaran_mode?: string | null;
+      pelanggaran_period_days?: number | null;
+    },
     stats: {
       streak: number;
       coins: number;
       tumblerCount: number;
       pelanggaranCount: number;
+      pelanggaranDates: string[];
       transaksiCount: number;
     },
   ): boolean {
@@ -279,7 +293,23 @@ export class AchievementService {
       case 'tumbler':
         return stats.tumblerCount >= achievement.target_value;
       case 'pelanggaran':
-        // target_value=0 artinya harus tidak ada pelanggaran
+        if (achievement.pelanggaran_mode === 'no_violation_days') {
+          const days = Number(achievement.pelanggaran_period_days ?? 0);
+          if (!Number.isInteger(days) || days < 1) return false;
+
+          const start = new Date();
+          start.setHours(0, 0, 0, 0);
+          start.setDate(start.getDate() - (days - 1));
+          const startMs = start.getTime();
+
+          return stats.pelanggaranDates.every((createdAt) => {
+            const violationDate = new Date(createdAt);
+            if (Number.isNaN(violationDate.getTime())) return true;
+            return violationDate.getTime() < startMs;
+          });
+        }
+
+        // mode count: target_value=0 artinya harus tidak ada pelanggaran total
         return stats.pelanggaranCount === achievement.target_value;
       case 'transaksi':
         return stats.transaksiCount >= achievement.target_value;
@@ -428,6 +458,37 @@ export class AchievementService {
 
     if (!achievementId) {
       throw new BadRequestException('Achievement harus dipilih');
+    }
+
+    const moderation = analyzeShowcaseNote(noteText);
+
+    if (noteText && moderation.hasProfanity) {
+      throw new BadRequestException(
+        'Catatan mengandung kata yang tidak pantas. Silakan perbaiki sebelum disimpan.',
+      );
+    }
+
+    const { data: existingNote, error: existingNoteError } = await supabase
+      .from('achievement_showcase_note')
+      .select('id, expires_at')
+      .eq('nis', nis)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (existingNoteError) {
+      throw new BadRequestException(
+        `Gagal memeriksa catatan showcase aktif: ${existingNoteError.message}`,
+      );
+    }
+
+    if (
+      existingNote?.id &&
+      existingNote.expires_at &&
+      new Date(existingNote.expires_at).getTime() > Date.now()
+    ) {
+      throw new BadRequestException(
+        'Catatan aktif sudah ada. Hapus catatan yang sekarang terlebih dahulu.',
+      );
     }
 
     const { data: ownership, error: ownershipError } = await supabase

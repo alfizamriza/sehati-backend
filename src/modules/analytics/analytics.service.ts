@@ -126,9 +126,11 @@ export interface AnalyticsResponse {
   stats: StatCard[];
   trend: TrendPoint[];
   heatmapPelanggaran: HeatmapCell[];
+  heatmapLogin: HeatmapCell[];
   donutMetodeBayar: DonutSlice[];
   donutKemasan: DonutSlice[];
   topSiswa: RankingItem[];
+  topSiswaLogin: RankingItem[];
   topProduk: RankingItem[];
   progressKelas: ClassProgress[];
   lastUpdated: string;
@@ -300,6 +302,17 @@ export class AnalyticsService {
       row.map((count, hour) => ({ day, hour, count })),
     );
 
+    const kelasMap: Record<number, string> = {};
+    (kelasRows ?? []).forEach((k: any) => {
+      kelasMap[k.id] = `${formatTingkat(k.tingkat)} ${k.nama}`;
+    });
+
+    const { heatmapLogin, topSiswaLogin } = await this.buildLoginAnalytics(
+      supabase,
+      range,
+      kelasMap,
+    );
+
     // ── DONUT: Metode Bayar ────────────────────────────────────────────────
     const methodCount: Record<string, number> = { tunai: 0, voucher: 0, coins: 0 };
     curTx.forEach((t: any) => {
@@ -321,11 +334,6 @@ export class AnalyticsService {
     const donutKemasan = await this.getDonutKemasan(supabase, range);
 
     // ── TOP SISWA ─────────────────────────────────────────────────────────
-    const kelasMap: Record<number, string> = {};
-    (kelasRows ?? []).forEach((k: any) => {
-      kelasMap[k.id] = `${formatTingkat(k.tingkat)} ${k.nama}`;
-    });
-
     const topSiswa: RankingItem[] = (siswaAllRows ?? [])
       .slice(0, 8)
       .map((s: any, i: number) => ({
@@ -357,9 +365,9 @@ export class AnalyticsService {
 
     return {
       period, range, stats, trend,
-      heatmapPelanggaran,
+      heatmapPelanggaran, heatmapLogin,
       donutMetodeBayar, donutKemasan,
-      topSiswa, topProduk, progressKelas,
+      topSiswa, topSiswaLogin, topProduk, progressKelas,
       lastUpdated: new Date().toISOString(),
     };
   }
@@ -541,5 +549,107 @@ export class AnalyticsService {
         coinsRata,
       };
     }).sort((a, b) => b.kepatuhanPct - a.kepatuhanPct);
+  }
+
+  private async buildLoginAnalytics(
+    supabase: any,
+    range: DateRange,
+    kelasMap: Record<number, string>,
+  ): Promise<{ heatmapLogin: HeatmapCell[]; topSiswaLogin: RankingItem[] }> {
+    const emptyHeatmap = Array.from({ length: 7 }, (_, day) =>
+      Array.from({ length: 24 }, (_, hour) => ({ day, hour, count: 0 })),
+    ).flat();
+
+    const { data: loginRows, error } = await supabase
+      .from('login_audit_log')
+      .select('role, actor_user_id, actor_identifier, actor_name, status, login_at')
+      .eq('status', 'success')
+      .gte('login_at', `${range.start}T00:00:00`)
+      .lte('login_at', `${range.end}T23:59:59`);
+
+    if (error) {
+      console.warn('[AnalyticsService] Login audit analytics dilewati:', error.message);
+      return { heatmapLogin: emptyHeatmap, topSiswaLogin: [] };
+    }
+
+    const siswaIds = Array.from(
+      new Set(
+        (loginRows ?? [])
+          .filter((row: any) => row.role === 'siswa' && row.actor_user_id)
+          .map((row: any) => String(row.actor_user_id)),
+      ),
+    );
+
+    const siswaKelasMap = new Map<string, number | null>();
+    if (siswaIds.length > 0) {
+      const { data: siswaRows } = await supabase
+        .from('siswa')
+        .select('nis, kelas_id')
+        .in('nis', siswaIds);
+
+      (siswaRows ?? []).forEach((row: any) => {
+        siswaKelasMap.set(String(row.nis), row.kelas_id != null ? Number(row.kelas_id) : null);
+      });
+    }
+
+    const heatmapBuckets = Array.from({ length: 7 }, () =>
+      Array.from({ length: 24 }, () => new Set<string>()),
+    );
+
+    const siswaLoginMap = new Map<
+      string,
+      { count: number; name: string; kelasId: number | null }
+    >();
+
+    (loginRows ?? []).forEach((row: any) => {
+      const loginAt = row?.login_at ? new Date(row.login_at) : null;
+      if (!loginAt || Number.isNaN(loginAt.getTime())) return;
+
+      const day = (loginAt.getDay() + 6) % 7;
+      const hour = loginAt.getHours();
+      const actorKey = String(row.actor_user_id ?? row.actor_identifier ?? '').trim();
+      if (!actorKey) return;
+
+      heatmapBuckets[day][hour].add(actorKey);
+
+      if (row.role !== 'siswa') return;
+
+      const prev = siswaLoginMap.get(actorKey);
+      const kelasId = siswaKelasMap.get(actorKey) ?? null;
+      siswaLoginMap.set(actorKey, {
+        count: (prev?.count ?? 0) + 1,
+        name: row.actor_name ?? row.actor_identifier ?? actorKey,
+        kelasId: prev?.kelasId ?? kelasId,
+      });
+    });
+
+    const heatmapLogin = heatmapBuckets.flatMap((row, day) =>
+      row.map((bucket, hour) => ({
+        day,
+        hour,
+        count: bucket.size,
+      })),
+    );
+
+    const topSiswaLogin: RankingItem[] = Array.from(siswaLoginMap.entries())
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 8)
+      .map(([id, item], index) => ({
+        rank: index + 1,
+        id,
+        name: item.name,
+        sub: item.kelasId != null ? (kelasMap[item.kelasId] ?? '-') : '-',
+        value: item.count,
+        valueLabel: `${item.count.toLocaleString('id-ID')} login`,
+        avatarInitials:
+          item.name
+            ?.split(' ')
+            .slice(0, 2)
+            .map((part: string) => part[0])
+            .join('')
+            .toUpperCase() ?? '??',
+      }));
+
+    return { heatmapLogin, topSiswaLogin };
   }
 }

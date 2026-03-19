@@ -36,6 +36,8 @@ export interface Achievement {
   deskripsi?: string;
   tipe: 'streak' | 'coins' | 'tumbler' | 'pelanggaran' | 'transaksi';
   target_value: number;
+  pelanggaran_mode?: 'count' | 'no_violation_days' | null;
+  pelanggaran_period_days?: number | null;
   icon?: string;
   badge_color?: string;
   coins_reward?: number;
@@ -268,6 +270,20 @@ export class PengaturanService {
   async createAchievement(dto: Omit<Achievement, 'id' | 'created_at'>): Promise<Achievement> {
     if (dto.target_value < 0) throw new BadRequestException('Target value tidak boleh negatif.');
     if ((dto.coins_reward ?? 0) < 0) throw new BadRequestException('Coins reward tidak boleh negatif.');
+    if (dto.tipe === 'pelanggaran') {
+      dto.pelanggaran_mode = dto.pelanggaran_mode ?? 'count';
+      if (dto.pelanggaran_mode === 'no_violation_days') {
+        if (!dto.pelanggaran_period_days || dto.pelanggaran_period_days < 1) {
+          throw new BadRequestException('Durasi hari tanpa pelanggaran wajib diisi minimal 1 hari.');
+        }
+        dto.target_value = 0;
+      } else {
+        dto.pelanggaran_period_days = null;
+      }
+    } else {
+      dto.pelanggaran_mode = null;
+      dto.pelanggaran_period_days = null;
+    }
     if (dto.voucher_reward) {
       if (!dto.voucher_nominal || dto.voucher_nominal <= 0 || !dto.voucher_tipe_voucher) {
         throw new BadRequestException('Jika voucher aktif, nominal dan tipe voucher wajib diisi.');
@@ -298,7 +314,7 @@ export class PengaturanService {
 
     const { data: existing, error: existingError } = await this.db
       .from('achievement')
-      .select('voucher_reward,voucher_nominal,voucher_tipe_voucher')
+      .select('tipe,voucher_reward,voucher_nominal,voucher_tipe_voucher,pelanggaran_mode,pelanggaran_period_days')
       .eq('id', id)
       .single();
 
@@ -310,6 +326,25 @@ export class PengaturanService {
 
     if (effectiveVoucherReward && (!effectiveVoucherNominal || !effectiveVoucherType)) {
       throw new BadRequestException('Jika voucher aktif, nominal dan tipe voucher wajib diisi.');
+    }
+
+    const effectiveTipe = dto.tipe ?? existing.tipe;
+    const effectivePelanggaranMode = dto.pelanggaran_mode ?? existing.pelanggaran_mode ?? 'count';
+    const effectivePelanggaranPeriodDays =
+      dto.pelanggaran_period_days ?? existing.pelanggaran_period_days ?? null;
+
+    if (effectiveTipe === 'pelanggaran') {
+      if (effectivePelanggaranMode === 'no_violation_days') {
+        if (!effectivePelanggaranPeriodDays || effectivePelanggaranPeriodDays < 1) {
+          throw new BadRequestException('Durasi hari tanpa pelanggaran wajib diisi minimal 1 hari.');
+        }
+        dto.target_value = 0;
+      } else if (dto.pelanggaran_mode === 'count' || effectivePelanggaranMode === 'count') {
+        dto.pelanggaran_period_days = null;
+      }
+    } else {
+      dto.pelanggaran_mode = null;
+      dto.pelanggaran_period_days = null;
     }
 
     if (dto.voucher_reward === false) {

@@ -7,6 +7,7 @@ import {
 import { SupabaseService } from 'src/supabase/supabase.service';
 import { CreateKantinDto } from './dto/create-kantin.dto';
 import { UpdateKantinDto } from './dto/update-kantin.dto';
+import type { UpdateKantinPasswordDto } from './dto/update-kantin-password.dto';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -248,6 +249,50 @@ export class KantinService {
     return {
       success: true,
       message: `Akun kantin ${existing.nama} berhasil dihapus`,
+    };
+  }
+
+  async updatePassword(userId: number, dto: UpdateKantinPasswordDto) {
+    const supabase = this.supabaseService.getClient();
+
+    if (!dto.passwordBaru || dto.passwordBaru.length < 6) {
+      throw new BadRequestException('Password baru minimal 6 karakter');
+    }
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, role, password')
+      .eq('id', userId)
+      .eq('role', 'kantin')
+      .single();
+
+    if (error || !user) {
+      throw new NotFoundException('Akun kantin tidak ditemukan');
+    }
+
+    const valid = await bcrypt.compare(dto.passwordLama, user.password);
+    if (!valid) {
+      throw new BadRequestException('Password lama tidak sesuai');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.passwordBaru, 10);
+
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({
+        password: passwordHash,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId)
+      .eq('role', 'kantin');
+
+    if (updateError) {
+      throw new BadRequestException('Gagal mengubah password kantin');
+    }
+
+    return {
+      success: true,
+      message: 'Password kantin berhasil diubah',
     };
   }
 }
