@@ -7,6 +7,7 @@ import {
 import { SupabaseService } from 'src/supabase/supabase.service';
 import { CreateGuruDto } from './dto/create-guru.dto';
 import { UpdateGuruDto } from './dto/update-guru.dto';
+import { UpdateGuruPasswordDto } from './dto/update-guru-password.dto';
 import * as bcrypt from 'bcrypt';
 
 function formatKelasLabel(tingkat: number, nama: string): string {
@@ -351,6 +352,47 @@ export class GuruService {
     return {
       success: true,
       message: `Guru ${existing.nama} berhasil dihapus`,
+    };
+  }
+
+  async updatePassword(nip: string, dto: UpdateGuruPasswordDto) {
+    const supabase = this.supabaseService.getClient();
+
+    if (!dto.passwordBaru || dto.passwordBaru.length < 6) {
+      throw new BadRequestException('Password baru minimal 6 karakter');
+    }
+
+    const { data: guru, error } = await supabase
+      .from('guru')
+      .select('nip, password_hash')
+      .eq('nip', nip)
+      .maybeSingle();
+
+    if (error || !guru) {
+      throw new NotFoundException('Guru tidak ditemukan');
+    }
+
+    const valid = await bcrypt.compare(dto.passwordLama, guru.password_hash);
+    if (!valid) {
+      throw new BadRequestException('Password lama tidak sesuai');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.passwordBaru, 10);
+    const { error: updateError } = await supabase
+      .from('guru')
+      .update({
+        password_hash: passwordHash,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('nip', nip);
+
+    if (updateError) {
+      throw new BadRequestException('Gagal mengubah password guru');
+    }
+
+    return {
+      success: true,
+      message: 'Password guru berhasil diubah',
     };
   }
 }

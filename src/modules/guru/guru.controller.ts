@@ -1,10 +1,11 @@
 import {
-  Controller, Get, Post, Put, Delete,
-  Body, Param, Query, UseGuards,
+  Controller, Get, Post, Put, Delete, Patch,
+  Body, Param, Query, UseGuards, Req,
 } from '@nestjs/common';
 import { GuruService } from './guru.service';
 import { CreateGuruDto } from './dto/create-guru.dto';
 import { UpdateGuruDto } from './dto/update-guru.dto';
+import type { UpdateGuruPasswordDto } from './dto/update-guru-password.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
@@ -52,5 +53,11 @@ export class GuruController {
   @Delete(':nip')
   async remove(@Param('nip') nip: string) {
     return this.guruService.remove(nip);
+  }
+
+  @Patch('password')
+  @Roles(UserRole.GURU)
+  async updatePassword(@Req() req: any, @Body() dto: UpdateGuruPasswordDto) {
+    return this.guruService.updatePassword(req.user.sub, dto);
   }
 }

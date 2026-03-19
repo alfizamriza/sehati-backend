@@ -7,6 +7,11 @@ import { SupabaseService } from '../../supabase/supabase.service';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { AchievementService } from '../achievement/achievement.service';
 
+interface LoginAuditMeta {
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -15,7 +20,7 @@ export class AuthService {
     private achievementService: AchievementService,
   ) { }
 
-  async login(loginDto: LoginDto) {
+  async login(loginDto: LoginDto, meta: LoginAuditMeta = {}) {
     const supabase = this.supabaseService.getClient();
     let user: any;
     const identifier = loginDto.identifier.trim();
@@ -29,6 +34,14 @@ export class AuthService {
         .single();
 
       if (error || !data) {
+        await this.recordLoginAudit({
+          role: loginDto.role,
+          identifier,
+          status: 'failed',
+          failureReason: 'Username tidak ditemukan',
+          ipAddress: meta.ipAddress,
+          userAgent: meta.userAgent,
+        });
         throw new UnauthorizedException('Username tidak ditemukan');
       }
       user = data;
@@ -40,6 +53,14 @@ export class AuthService {
         .single();
 
       if (error || !data) {
+        await this.recordLoginAudit({
+          role: loginDto.role,
+          identifier,
+          status: 'failed',
+          failureReason: 'NIP tidak ditemukan',
+          ipAddress: meta.ipAddress,
+          userAgent: meta.userAgent,
+        });
         throw new UnauthorizedException('NIP tidak ditemukan');
       }
       user = data;
@@ -51,6 +72,14 @@ export class AuthService {
         .single();
 
       if (error || !data) {
+        await this.recordLoginAudit({
+          role: loginDto.role,
+          identifier,
+          status: 'failed',
+          failureReason: 'NIS tidak ditemukan',
+          ipAddress: meta.ipAddress,
+          userAgent: meta.userAgent,
+        });
         throw new UnauthorizedException('NIS tidak ditemukan');
       }
       user = data;
@@ -60,6 +89,16 @@ export class AuthService {
 
     // 2. ⚠️ DOUBLE CHECK ROLE (untuk users table)
     if ((loginDto.role === 'kantin' || loginDto.role === 'admin') && user.role !== loginDto.role) {
+      await this.recordLoginAudit({
+        role: loginDto.role,
+        identifier,
+        displayName: user.nama ?? null,
+        status: 'failed',
+        failureReason: `Role yang dipilih salah. Akun ini terdaftar sebagai ${user.role}`,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+        actorUserId: user.id?.toString?.() ?? null,
+      });
       throw new UnauthorizedException(
         `Role yang dipilih salah. Akun ini terdaftar sebagai ${user.role}`
       );
@@ -74,11 +113,31 @@ export class AuthService {
     }
 
     if (!isPasswordValid) {
+      await this.recordLoginAudit({
+        role: loginDto.role,
+        identifier,
+        displayName: user.nama ?? null,
+        status: 'failed',
+        failureReason: 'Password salah',
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+        actorUserId: this.resolveActorUserId(loginDto.role, user),
+      });
       throw new UnauthorizedException('Password salah');
     }
 
     // 4. Check active status
     if (!user.is_active) {
+      await this.recordLoginAudit({
+        role: loginDto.role,
+        identifier,
+        displayName: user.nama ?? null,
+        status: 'failed',
+        failureReason: 'Akun tidak aktif',
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+        actorUserId: this.resolveActorUserId(loginDto.role, user),
+      });
       throw new UnauthorizedException('Akun tidak aktif');
     }
 
@@ -108,6 +167,16 @@ export class AuthService {
     };
 
     const token = this.jwtService.sign(payload);
+
+    await this.recordLoginAudit({
+      role: loginDto.role,
+      identifier,
+      displayName: user.nama ?? null,
+      status: 'success',
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      actorUserId: this.resolveActorUserId(loginDto.role, user),
+    });
 
     // 6. Return
     return {
@@ -272,6 +341,40 @@ export class AuthService {
     };
   }
 
+  async getLoginLogs(limit = 50) {
+    const supabase = this.supabaseService.getClient();
+    const safeLimit = Math.min(Math.max(limit, 1), 200);
+
+    const { data, error } = await supabase
+      .from('login_audit_log')
+      .select(
+        'id, role, actor_user_id, actor_identifier, actor_name, login_at, ip_address, user_agent, status, failure_reason, created_at',
+      )
+      .order('login_at', { ascending: false })
+      .limit(safeLimit);
+
+    if (error) {
+      throw new BadRequestException(`Gagal mengambil login log: ${error.message}`);
+    }
+
+    return {
+      success: true,
+      data: (data ?? []).map((item) => ({
+        id: item.id,
+        role: item.role,
+        actorUserId: item.actor_user_id,
+        actorIdentifier: item.actor_identifier,
+        actorName: item.actor_name,
+        loginAt: item.login_at,
+        ipAddress: item.ip_address,
+        userAgent: item.user_agent,
+        status: item.status,
+        failureReason: item.failure_reason,
+        createdAt: item.created_at,
+      })),
+    };
+  }
+
   private getCollectionByRole(role: string): string {
     switch (role) {
       case UserRole.SISWA:
@@ -294,6 +397,46 @@ export class AuthService {
       kantin: '/kantin/dashboard',
     };
     return paths[role] || '/auth';
+  }
+
+  private resolveActorUserId(role: string, user: any): string | null {
+    if (role === UserRole.SISWA) {
+      return user?.nis ?? null;
+    }
+
+    if (role === UserRole.GURU) {
+      return user?.nip ?? null;
+    }
+
+    return user?.id != null ? String(user.id) : null;
+  }
+
+  private async recordLoginAudit(params: {
+    role: string;
+    identifier: string;
+    displayName?: string | null;
+    actorUserId?: string | null;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+    status: 'success' | 'failed';
+    failureReason?: string | null;
+  }) {
+    try {
+      await this.supabaseService.createDocument('login_audit_log', {
+        role: params.role,
+        actor_user_id: params.actorUserId ?? null,
+        actor_identifier: params.identifier,
+        actor_name: params.displayName ?? null,
+        login_at: new Date().toISOString(),
+        ip_address: params.ipAddress ?? null,
+        user_agent: params.userAgent ?? null,
+        status: params.status,
+        failure_reason: params.failureReason ?? null,
+        created_at: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('[AuthService] Gagal mencatat login audit:', error);
+    }
   }
 }
 
