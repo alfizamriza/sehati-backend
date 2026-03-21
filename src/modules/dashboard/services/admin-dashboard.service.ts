@@ -174,6 +174,7 @@ export class AdminDashboardService {
         nama,
         coins,
         streak,
+        foto_url,
         kelas:kelas_id (
           nama
         )
@@ -190,6 +191,7 @@ export class AdminDashboardService {
       kelas: getRelationName(siswa.kelas as MaybeRelation<{ nama: string }>),
       coins: siswa.coins || 0,
       streak: siswa.streak || 0,
+      foto_url: siswa.foto_url || null,
     })) || [];
   }
 

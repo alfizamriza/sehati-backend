@@ -277,7 +277,7 @@ export class SiswaDashboardService {
   private async getLeaderboard(currentNis: string) {
     const supabase = this.supabaseService.getClient();
     const { data: topSiswa } = await supabase.from('siswa')
-      .select('nis, nama, coins, streak, kelas:kelas_id (nama, tingkat)')
+      .select('nis, nama, coins, streak, foto_url, kelas:kelas_id (nama, tingkat)')
       .eq('is_active', true).order('coins', { ascending: false }).limit(3);
     return (topSiswa ?? []).map((item, index) => {
       const kelas = Array.isArray(item.kelas) ? item.kelas[0] : item.kelas;
@@ -288,6 +288,7 @@ export class SiswaDashboardService {
         coins: (item as any).coins || 0, streak: (item as any).streak || 0,
         medal: index === 0 ? 'gold' : index === 1 ? 'silver' : 'bronze',
         isMe: item.nis === currentNis,
+        foto_url: (item as any).foto_url || null,
       };
     });
   }

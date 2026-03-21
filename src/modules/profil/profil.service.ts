@@ -349,7 +349,7 @@ export class ProfilService {
     const nisStr = String(nis).trim();
 
     const ext = mimeType === 'image/png' ? 'png' : 'jpg';
-    const path = `${nisStr}/avatar.${ext}`;
+    const path = `${nisStr}/avatar-${Date.now()}.${ext}`;
 
     // Signed URL untuk upload (valid 60 detik)
     const { data, error } = await supabase.storage

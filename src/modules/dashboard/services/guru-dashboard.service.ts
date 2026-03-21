@@ -3,7 +3,7 @@ import { SupabaseService } from 'src/supabase/supabase.service';
 
 @Injectable()
 export class GuruDashboardService {
-  constructor(private supabaseService: SupabaseService) {}
+  constructor(private supabaseService: SupabaseService) { }
 
   // =====================================================
   // ROMAN NUMERAL CONVERTER
@@ -90,12 +90,12 @@ export class GuruDashboardService {
         isWaliKelas: guru.peran === 'wali_kelas',
         kelasWali: kelasWali
           ? {
-              id: kelasWali.id,
-              nama: kelasWali.nama,
-              tingkat: tingkatRoman,
-              jenjang: kelasWali.jenjang,
-              label: `${tingkatRoman} ${kelasWali.nama}`,
-            }
+            id: kelasWali.id,
+            nama: kelasWali.nama,
+            tingkat: tingkatRoman,
+            jenjang: kelasWali.jenjang,
+            label: `${tingkatRoman} ${kelasWali.nama}`,
+          }
           : null,
       },
     };
@@ -150,9 +150,9 @@ export class GuruDashboardService {
       .in('nis', nisList)
       .eq('tanggal', today);
 
-    const totalCoins  = (siswas || []).reduce((sum, s) => sum + (s.coins  || 0), 0);
+    const totalCoins = (siswas || []).reduce((sum, s) => sum + (s.coins || 0), 0);
     const totalStreak = (siswas || []).reduce((sum, s) => sum + (s.streak || 0), 0);
-    const rataRataCoins  = Math.round(totalCoins / totalSiswa);
+    const rataRataCoins = Math.round(totalCoins / totalSiswa);
     const rataRataStreak = Math.round((totalStreak / totalSiswa) * 10) / 10;
     const persentaseHadir = Math.round(((hadirHariIni || 0) / totalSiswa) * 100);
 
@@ -173,7 +173,7 @@ export class GuruDashboardService {
       .select('nis, nama, coins, streak')
       .eq('kelas_id', kelasId)
       .eq('is_active', true)
-      .order('coins',  { ascending: false })
+      .order('coins', { ascending: false })
       .order('streak', { ascending: false })
       .limit(limit);
 
@@ -251,11 +251,11 @@ export class GuruDashboardService {
     if (error) throw new BadRequestException(`Gagal mengambil riwayat pelanggaran konselor: ${error.message}`);
 
     const result = (data || []).map((p) => {
-      const siswa           = Array.isArray(p.siswa)             ? p.siswa[0]             : p.siswa;
-      const kelas           = siswa?.kelas ? (Array.isArray(siswa.kelas) ? siswa.kelas[0] : siswa.kelas) : null;
-      const tingkatRoman    = kelas ? this.convertToRomanNumeral(kelas.tingkat) : '';
+      const siswa = Array.isArray(p.siswa) ? p.siswa[0] : p.siswa;
+      const kelas = siswa?.kelas ? (Array.isArray(siswa.kelas) ? siswa.kelas[0] : siswa.kelas) : null;
+      const tingkatRoman = kelas ? this.convertToRomanNumeral(kelas.tingkat) : '';
       const jenisPelanggaran = Array.isArray(p.jenis_pelanggaran) ? p.jenis_pelanggaran[0] : p.jenis_pelanggaran;
-      const guru            = Array.isArray(p.guru)              ? p.guru[0]              : p.guru;
+      const guru = Array.isArray(p.guru) ? p.guru[0] : p.guru;
 
       return {
         id: p.id,
@@ -289,7 +289,7 @@ export class GuruDashboardService {
       .from('jenis_pelanggaran')
       .select('id, nama, kategori, bobot_coins, deskripsi, is_active')
       .order('kategori', { ascending: true })
-      .order('nama',     { ascending: true });
+      .order('nama', { ascending: true });
 
     if (error) throw new BadRequestException('Gagal mengambil jenis pelanggaran');
     return { success: true, data: data || [] };
@@ -323,7 +323,7 @@ export class GuruDashboardService {
       .maybeSingle();
 
     if (cekError) throw new BadRequestException(`Gagal validasi jenis pelanggaran: ${cekError.message}`);
-    if (existed)  throw new BadRequestException('Nama jenis pelanggaran sudah ada');
+    if (existed) throw new BadRequestException('Nama jenis pelanggaran sudah ada');
 
     const { data, error } = await supabase
       .from('jenis_pelanggaran')
@@ -350,11 +350,11 @@ export class GuruDashboardService {
     if (!existing) throw new BadRequestException('Jenis pelanggaran tidak ditemukan');
 
     const updateData: Record<string, any> = {};
-    if (dto.nama       !== undefined) updateData.nama       = dto.nama.trim();
-    if (dto.kategori   !== undefined) updateData.kategori   = dto.kategori;
+    if (dto.nama !== undefined) updateData.nama = dto.nama.trim();
+    if (dto.kategori !== undefined) updateData.kategori = dto.kategori;
     if (dto.bobot_coins !== undefined) updateData.bobot_coins = dto.bobot_coins;
-    if (dto.deskripsi  !== undefined) updateData.deskripsi  = dto.deskripsi;
-    if (dto.is_active  !== undefined) updateData.is_active  = dto.is_active;
+    if (dto.deskripsi !== undefined) updateData.deskripsi = dto.deskripsi;
+    if (dto.is_active !== undefined) updateData.is_active = dto.is_active;
 
     const { data, error } = await supabase
       .from('jenis_pelanggaran')
