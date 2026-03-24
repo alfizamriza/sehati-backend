@@ -208,6 +208,7 @@ export class AchievementService {
   ): Promise<{
     streak: number;
     coins: number;
+    siswaCreatedAt: string | null;
     tumblerCount: number;
     pelanggaranCount: number;
     pelanggaranDates: string[];
@@ -218,7 +219,7 @@ export class AchievementService {
     // Selalu ambil streak + coins dari tabel siswa (cepat, 1 query)
     const { data: siswa } = await supabase
       .from('siswa')
-      .select('streak, coins')
+      .select('streak, coins, created_at')
       .eq('nis', nis)
       .maybeSingle();
 
@@ -259,6 +260,8 @@ export class AchievementService {
     return {
       streak: siswa?.streak || 0,
       coins: siswa?.coins || 0,
+      siswaCreatedAt:
+        typeof siswa?.created_at === 'string' ? siswa.created_at : null,
       tumblerCount,
       pelanggaranCount,
       pelanggaranDates,
@@ -279,6 +282,7 @@ export class AchievementService {
     stats: {
       streak: number;
       coins: number;
+      siswaCreatedAt: string | null;
       tumblerCount: number;
       pelanggaranCount: number;
       pelanggaranDates: string[];
@@ -297,10 +301,25 @@ export class AchievementService {
           const days = Number(achievement.pelanggaran_period_days ?? 0);
           if (!Number.isInteger(days) || days < 1) return false;
 
+          const accountCreatedAt = stats.siswaCreatedAt
+            ? new Date(stats.siswaCreatedAt)
+            : null;
+          if (
+            !accountCreatedAt ||
+            Number.isNaN(accountCreatedAt.getTime())
+          ) {
+            return false;
+          }
+
           const start = new Date();
           start.setHours(0, 0, 0, 0);
           start.setDate(start.getDate() - (days - 1));
           const startMs = start.getTime();
+
+          // Akun harus sudah berumur minimal sesuai periode achievement.
+          if (accountCreatedAt.getTime() > startMs) {
+            return false;
+          }
 
           return stats.pelanggaranDates.every((createdAt) => {
             const violationDate = new Date(createdAt);
