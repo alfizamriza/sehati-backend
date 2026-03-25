@@ -5,9 +5,16 @@ import {
 import { PelanggaranService } from './pelanggaran.service';
 import { CreatePelanggaranDto } from './dto/create-pelanggaran.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { RolesGuard } from 'src/common/guards/roles.guard';
+import { PermissionsGuard } from 'src/common/guards/permissions.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { Permissions } from 'src/common/decorators/permissions.decorator';
+import { UserRole } from 'src/common/enums/user-role.enum';
 
 @Controller('api/pelanggaran')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+@Roles(UserRole.GURU, UserRole.ADMIN, UserRole.SISWA)
+@Permissions('manage_pelanggaran')
 export class PelanggaranController {
   constructor(private readonly pelanggaranService: PelanggaranService) {}
 
@@ -36,15 +43,21 @@ export class PelanggaranController {
     @Request() req: any,
     @Query('limit') limit?: string,
   ) {
-    const nipGuru = req.user?.nip || req.user?.sub;
-    return this.pelanggaranService.getRiwayatByGuru(nipGuru, limit ? parseInt(limit) : 100);
+    return this.pelanggaranService.getRiwayatByPelapor({
+      role: req.user?.role,
+      guruNip: req.user?.role === UserRole.GURU ? req.user?.sub : null,
+      siswaNis: req.user?.role === UserRole.SISWA ? req.user?.sub : null,
+    }, limit ? parseInt(limit) : 100);
   }
 
   // POST /pelanggaran
   @Post()
   createPelanggaran(@Body() dto: CreatePelanggaranDto, @Request() req: any) {
-    const nipGuru = req.user?.nip || req.user?.sub;
-    return this.pelanggaranService.createPelanggaran(dto, nipGuru);
+    return this.pelanggaranService.createPelanggaran(dto, {
+      role: req.user?.role,
+      guruNip: req.user?.role === UserRole.GURU ? req.user?.sub : null,
+      siswaNis: req.user?.role === UserRole.SISWA ? req.user?.sub : null,
+    });
   }
 
   // PATCH /pelanggaran/:id/bukti
@@ -54,8 +67,11 @@ export class PelanggaranController {
     @Body('bukti_foto_url') buktiUrl: string,
     @Request() req: any,
   ) {
-    const nipGuru = req.user?.nip || req.user?.sub;
-    return this.pelanggaranService.updateBuktiFoto(id, buktiUrl, nipGuru);
+    return this.pelanggaranService.updateBuktiFoto(id, buktiUrl, {
+      role: req.user?.role,
+      guruNip: req.user?.role === UserRole.GURU ? req.user?.sub : null,
+      siswaNis: req.user?.role === UserRole.SISWA ? req.user?.sub : null,
+    });
   }
 
   // PATCH /pelanggaran/:id
@@ -66,8 +82,11 @@ export class PelanggaranController {
     @Body() body: { jenis_pelanggaran_id?: number; catatan?: string },
     @Request() req: any,
   ) {
-    const nipGuru = req.user?.nip || req.user?.sub;
-    return this.pelanggaranService.updatePelanggaran(id, body, nipGuru);
+    return this.pelanggaranService.updatePelanggaran(id, body, {
+      role: req.user?.role,
+      guruNip: req.user?.role === UserRole.GURU ? req.user?.sub : null,
+      siswaNis: req.user?.role === UserRole.SISWA ? req.user?.sub : null,
+    });
   }
 
   // DELETE /pelanggaran/:id
@@ -77,7 +96,10 @@ export class PelanggaranController {
     @Param('id', ParseIntPipe) id: number,
     @Request() req: any,
   ) {
-    const nipGuru = req.user?.nip || req.user?.sub;
-    return this.pelanggaranService.deletePelanggaran(id, nipGuru);
+    return this.pelanggaranService.deletePelanggaran(id, {
+      role: req.user?.role,
+      guruNip: req.user?.role === UserRole.GURU ? req.user?.sub : null,
+      siswaNis: req.user?.role === UserRole.SISWA ? req.user?.sub : null,
+    });
   }
 }

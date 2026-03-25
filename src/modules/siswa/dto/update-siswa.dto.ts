@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, IsBoolean, MinLength, Length } from 'class-validator';
+import { IsOptional, IsString, IsInt, IsBoolean, MinLength, Length, IsArray } from 'class-validator';
 
 export class UpdateSiswaDto {
   @IsOptional()
@@ -17,4 +17,9 @@ export class UpdateSiswaDto {
   @IsOptional()
   @IsBoolean()
   statusAktif?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  permissions?: string[];
 }

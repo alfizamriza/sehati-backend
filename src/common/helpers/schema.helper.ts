@@ -9,7 +9,7 @@ export const EXPECTED_TABLES = {
     description: 'Data user (admin, kantin)'
   },
   siswa: {
-    columns: ['id', 'nis', 'nama', 'email', 'kelas_id', 'created_at'],
+    columns: ['id', 'nis', 'nama', 'email', 'kelas_id', 'created_at', 'permissions'],
     description: 'Data siswa'
   },
   guru: {
@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS siswa (
   user_id UUID REFERENCES users(id),
   coins INTEGER DEFAULT 0,
   streak INTEGER DEFAULT 0,
+  permissions TEXT[] DEFAULT '{}',
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
 );

@@ -202,6 +202,7 @@ export class SiswaService {
         coins,
         streak,
         is_active,
+        permissions,
         created_at,
         kelas:kelas_id (
           id,
@@ -225,6 +226,7 @@ export class SiswaService {
         kelas: kelas ? `${kelas.tingkat} ${kelas.nama}` : '-',
         kelasId: kelas?.id ?? null,
         statusAktif: siswa.is_active,
+        permissions: siswa.permissions || [],
         coins: siswa.coins,
         streak: streakData.currentStreak,
         createdAt: siswa.created_at,
@@ -252,6 +254,7 @@ export class SiswaService {
         streak,
         last_streak_date,
         is_active,
+        permissions,
         kelas:kelas_id (
           id,
           nama,
@@ -277,6 +280,7 @@ export class SiswaService {
           kelas: kelas ? `${kelas.tingkat} ${kelas.nama}` : '-',
           kelasId: kelas?.id ?? null,
           statusAktif: siswa.is_active,
+          permissions: siswa.permissions || [],
           coins: siswa.coins,
           streak: streakData.currentStreak,
           lastStreakDate: siswa.last_streak_date,
@@ -326,6 +330,7 @@ export class SiswaService {
           password_hash: hashedPassword,
           kelas_id: createSiswaDto.kelasId,
           is_active: createSiswaDto.statusAktif ?? true,
+          permissions: createSiswaDto.permissions || [],
           coins: 0,
           streak: 0,
         },
@@ -387,6 +392,9 @@ export class SiswaService {
     if (updateSiswaDto.kelasId) updateData.kelas_id = updateSiswaDto.kelasId;
     if (updateSiswaDto.statusAktif !== undefined) {
       updateData.is_active = updateSiswaDto.statusAktif;
+    }
+    if (updateSiswaDto.permissions !== undefined) {
+      updateData.permissions = updateSiswaDto.permissions;
     }
 
     // Hash password if provided

@@ -173,7 +173,7 @@ export class RiwayatService {
 
     const { data: rawRows, error } = await supabase
       .from('absensi_tumbler')
-      .select('id, nip, tanggal, waktu, coins_reward, streak_bonus, method, created_at')
+      .select('id, nip, siswa_nis, tanggal, waktu, coins_reward, streak_bonus, method, created_at')
       .eq('nis', nisStr)
       .order('tanggal', { ascending: false })
       .order('created_at', { ascending: false })
@@ -184,11 +184,18 @@ export class RiwayatService {
     if (rows.length === 0) return [];
 
     const nips = [...new Set(rows.map((r) => r.nip).filter(Boolean))];
+    const siswaNisList = [...new Set(rows.map((r) => r.siswa_nis).filter(Boolean))];
     const guruMap: Record<string, string> = {};
+    const siswaMap: Record<string, string> = {};
     if (nips.length > 0) {
       const { data: guruRows } = await supabase
         .from('guru').select('nip, nama').in('nip', nips);
       (guruRows ?? []).forEach((g: any) => { guruMap[String(g.nip)] = g.nama; });
+    }
+    if (siswaNisList.length > 0) {
+      const { data: siswaRows } = await supabase
+        .from('siswa').select('nis, nama').in('nis', siswaNisList);
+      (siswaRows ?? []).forEach((s: any) => { siswaMap[String(s.nis)] = s.nama; });
     }
 
     let kelasLabel = '-';
@@ -210,7 +217,7 @@ export class RiwayatService {
       coinsReward: r.coins_reward ?? 0,
       streakBonus: r.streak_bonus ?? 0,
       method: r.method ?? 'manual',
-      dicatatOleh: guruMap[String(r.nip)] ?? '-',
+      dicatatOleh: guruMap[String(r.nip)] ?? siswaMap[String(r.siswa_nis)] ?? '-',
       kelas: kelasLabel,
     }));
   }
@@ -324,7 +331,7 @@ export class RiwayatService {
 
     const { data: rawRows, error } = await supabase
       .from('pelanggaran')
-      .select('id, nip, jenis_pelanggaran_id, tanggal, waktu, created_at, coins_penalty, catatan, bukti_foto_url, verified_at, status')
+      .select('id, nip, siswa_nis, jenis_pelanggaran_id, tanggal, waktu, created_at, coins_penalty, catatan, bukti_foto_url, verified_at, status')
       .eq('nis', nisStr)
       .eq('status', 'approved')
       .order('tanggal', { ascending: false })
@@ -336,11 +343,18 @@ export class RiwayatService {
     if (rows.length === 0) return [];
 
     const nips = [...new Set(rows.map((r) => r.nip).filter(Boolean))];
+    const siswaNisList = [...new Set(rows.map((r) => r.siswa_nis).filter(Boolean))];
     const guruMap: Record<string, string> = {};
+    const siswaMap: Record<string, string> = {};
     if (nips.length > 0) {
       const { data: guruRows } = await supabase
         .from('guru').select('nip, nama').in('nip', nips);
       (guruRows ?? []).forEach((g: any) => { guruMap[String(g.nip)] = g.nama; });
+    }
+    if (siswaNisList.length > 0) {
+      const { data: siswaRows } = await supabase
+        .from('siswa').select('nis, nama').in('nis', siswaNisList);
+      (siswaRows ?? []).forEach((s: any) => { siswaMap[String(s.nis)] = s.nama; });
     }
 
     const jenisIds = [...new Set(rows.map((r) => r.jenis_pelanggaran_id).filter(Boolean))];
@@ -365,7 +379,7 @@ export class RiwayatService {
         coinsPenalty: Math.abs(p.coins_penalty ?? 0),
         catatan: p.catatan ?? null,
         buktiUrl: p.bukti_foto_url ?? null,
-        dicatatOleh: guruMap[String(p.nip)] ?? '-',
+        dicatatOleh: guruMap[String(p.nip)] ?? siswaMap[String(p.siswa_nis)] ?? '-',
         verifiedAt: p.verified_at ?? null,
         status: p.status as 'pending' | 'approved' | 'rejected',
       };

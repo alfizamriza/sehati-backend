@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsInt, IsBoolean, IsOptional, MinLength, Length } from 'class-validator';
+import { IsNotEmpty, IsString, IsInt, IsBoolean, IsOptional, MinLength, Length, IsArray } from 'class-validator';
 
 export class CreateSiswaDto {
   @IsNotEmpty({ message: 'NIS tidak boleh kosong' })
@@ -22,4 +22,9 @@ export class CreateSiswaDto {
   @IsOptional()
   @IsBoolean()
   statusAktif?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  permissions?: string[];
 }

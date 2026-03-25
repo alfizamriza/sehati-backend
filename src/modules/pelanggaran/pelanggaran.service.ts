@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { SupabaseService } from 'src/supabase/supabase.service';
 import { CreatePelanggaranDto } from './dto/create-pelanggaran.dto';
+import { UserRole } from 'src/common/enums/user-role.enum';
 
 // ─── HELPER ───────────────────────────────────────────────────────────────────
 function toRomawi(n: number): string {
@@ -37,6 +38,28 @@ function nowWIB(): { tanggal: string; waktu: string; iso: string } {
 @Injectable()
 export class PelanggaranService {
   constructor(private supabaseService: SupabaseService) {}
+
+  private normalizePelapor(actor: {
+    role?: string;
+    guruNip?: string | null;
+    siswaNis?: string | null;
+  }): { role: string; guruNip: string | null; siswaNis: string | null } {
+    return {
+      role: actor.role ?? '',
+      guruNip: actor.guruNip ? String(actor.guruNip).trim() : null,
+      siswaNis: actor.siswaNis ? String(actor.siswaNis).trim() : null,
+    };
+  }
+
+  private isOwnedByPelapor(
+    record: { nip?: string | null; siswa_nis?: string | null },
+    actor: { role?: string; guruNip?: string | null; siswaNis?: string | null },
+  ): boolean {
+    const pelapor = this.normalizePelapor(actor);
+    if (pelapor.role === UserRole.GURU) return record.nip === pelapor.guruNip;
+    if (pelapor.role === UserRole.SISWA) return record.siswa_nis === pelapor.siswaNis;
+    return false;
+  }
 
   // =====================================================
   // GET KELAS LIST
@@ -94,13 +117,36 @@ export class PelanggaranService {
   // =====================================================
   // CREATE PELANGGARAN
   // =====================================================
-  async createPelanggaran(dto: CreatePelanggaranDto, nipGuru: string) {
+  async createPelanggaran(
+    dto: CreatePelanggaranDto,
+    actor: { role?: string; guruNip?: string | null; siswaNis?: string | null },
+  ) {
     const supabase = this.supabaseService.getClient();
+    const pelapor = this.normalizePelapor(actor);
 
-    const { data: guru, error: guruError } = await supabase
-      .from('guru').select('nip, nama, peran')
-      .eq('nip', nipGuru).eq('is_active', true).maybeSingle();
-    if (guruError || !guru) throw new UnauthorizedException('Data guru tidak ditemukan');
+    let pelaporNama = '-';
+    let pelaporNip: string | null = null;
+    let pelaporSiswaNis: string | null = null;
+
+    if (pelapor.role === UserRole.GURU) {
+      const { data: guru, error: guruError } = await supabase
+        .from('guru').select('nip, nama, peran')
+        .eq('nip', pelapor.guruNip).eq('is_active', true).maybeSingle();
+      if (guruError || !guru) throw new UnauthorizedException('Data guru tidak ditemukan');
+      pelaporNama = guru.nama;
+      pelaporNip = guru.nip;
+    } else if (pelapor.role === UserRole.SISWA) {
+      const { data: siswaPelapor, error: siswaPelaporError } = await supabase
+        .from('siswa').select('nis, nama')
+        .eq('nis', pelapor.siswaNis).eq('is_active', true).maybeSingle();
+      if (siswaPelaporError || !siswaPelapor) {
+        throw new UnauthorizedException('Data siswa pelapor tidak ditemukan');
+      }
+      pelaporNama = siswaPelapor.nama;
+      pelaporSiswaNis = siswaPelapor.nis;
+    } else {
+      throw new UnauthorizedException('Role pelapor tidak diizinkan');
+    }
 
     const { data: siswa, error: siswaError } = await supabase
       .from('siswa').select('nis, nama, coins')
@@ -119,7 +165,8 @@ export class PelanggaranService {
       .from('pelanggaran')
       .insert([{
         nis: dto.nis,
-        nip: nipGuru,
+        ...(pelaporNip ? { nip: pelaporNip } : {}),
+        ...(pelaporSiswaNis ? { siswa_nis: pelaporSiswaNis } : {}),
         jenis_pelanggaran_id: dto.jenis_pelanggaran_id,
         tanggal,                    // ← WIB ✅
         waktu,                      // ← WIB ✅
@@ -131,8 +178,7 @@ export class PelanggaranService {
       .select(`
         id, status, tanggal, waktu, coins_penalty, catatan, bukti_foto_url,
         siswa:nis (nis, nama),
-        jenis_pelanggaran:jenis_pelanggaran_id (id, nama, kategori, bobot_coins),
-        guru:nip (nip, nama)
+        jenis_pelanggaran:jenis_pelanggaran_id (id, nama, kategori, bobot_coins)
       `)
       .single();
 
@@ -140,8 +186,6 @@ export class PelanggaranService {
 
     const siswaData = Array.isArray(created.siswa)             ? created.siswa[0]             : created.siswa;
     const jenisData = Array.isArray(created.jenis_pelanggaran) ? created.jenis_pelanggaran[0] : created.jenis_pelanggaran;
-    const guruData  = Array.isArray(created.guru)              ? created.guru[0]              : created.guru;
-
     return {
       success: true,
       message: `Pelanggaran "${jenis.nama}" untuk ${siswa.nama} berhasil dicatat`,
@@ -151,7 +195,7 @@ export class PelanggaranService {
         catatan: created.catatan, buktiUrl: created.bukti_foto_url,
         siswa:            { nis: siswaData?.nis,  nama: siswaData?.nama },
         jenisPelanggaran: { id: jenisData?.id,    nama: jenisData?.nama, kategori: jenisData?.kategori },
-        guru:             { nip: guruData?.nip,   nama: guruData?.nama },
+        guru:             { nip: pelaporNip ?? '-', nama: pelaporNama },
       },
     };
   }
@@ -159,15 +203,19 @@ export class PelanggaranService {
   // =====================================================
   // UPDATE BUKTI FOTO URL
   // =====================================================
-  async updateBuktiFoto(pelanggaranId: number, buktiUrl: string, nipGuru: string) {
+  async updateBuktiFoto(
+    pelanggaranId: number,
+    buktiUrl: string,
+    actor: { role?: string; guruNip?: string | null; siswaNis?: string | null },
+  ) {
     const supabase = this.supabaseService.getClient();
 
     const { data: existing, error: fetchError } = await supabase
-      .from('pelanggaran').select('id, nip, status')
+      .from('pelanggaran').select('id, nip, siswa_nis, status')
       .eq('id', pelanggaranId).maybeSingle();
 
     if (fetchError || !existing) throw new BadRequestException('Pelanggaran tidak ditemukan');
-    if (existing.nip !== nipGuru) throw new UnauthorizedException('Anda tidak berhak mengubah pelanggaran ini');
+    if (!this.isOwnedByPelapor(existing, actor)) throw new UnauthorizedException('Anda tidak berhak mengubah pelanggaran ini');
 
     const { data, error } = await supabase
       .from('pelanggaran').update({ bukti_foto_url: buktiUrl })
@@ -180,21 +228,34 @@ export class PelanggaranService {
   // =====================================================
   // GET RIWAYAT PELANGGARAN OLEH GURU SENDIRI
   // =====================================================
-  async getRiwayatByGuru(nipGuru: string, limit = 100) {
+  async getRiwayatByPelapor(
+    actor: { role?: string; guruNip?: string | null; siswaNis?: string | null },
+    limit = 100,
+  ) {
     const supabase = this.supabaseService.getClient();
     const safeLimit = Math.min(Math.max(limit, 1), 200);
+    const pelapor = this.normalizePelapor(actor);
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('pelanggaran')
       .select(`
         id, status, tanggal, coins_penalty, catatan, bukti_foto_url,
         siswa:nis (nis, nama, kelas:kelas_id (nama, tingkat)),
         jenis_pelanggaran:jenis_pelanggaran_id (id, nama, kategori)
       `)
-      .eq('nip', nipGuru)
       .order('tanggal',    { ascending: false })
       .order('created_at', { ascending: false })
       .limit(safeLimit);
+
+    if (pelapor.role === UserRole.GURU) {
+      query = query.eq('nip', pelapor.guruNip);
+    } else if (pelapor.role === UserRole.SISWA) {
+      query = query.eq('siswa_nis', pelapor.siswaNis);
+    } else {
+      throw new UnauthorizedException('Role pelapor tidak diizinkan');
+    }
+
+    const { data, error } = await query;
 
     if (error) throw new BadRequestException('Gagal mengambil riwayat pelanggaran');
 
@@ -232,16 +293,16 @@ export class PelanggaranService {
   async updatePelanggaran(
     id: number,
     dto: { jenis_pelanggaran_id?: number; catatan?: string },
-    nipGuru: string,
+    actor: { role?: string; guruNip?: string | null; siswaNis?: string | null },
   ) {
     const supabase = this.supabaseService.getClient();
 
     const { data: existing, error: fetchError } = await supabase
-      .from('pelanggaran').select('id, nip, status')
+      .from('pelanggaran').select('id, nip, siswa_nis, status')
       .eq('id', id).maybeSingle();
 
     if (fetchError || !existing) throw new BadRequestException('Pelanggaran tidak ditemukan');
-    if (existing.nip !== nipGuru)      throw new UnauthorizedException('Anda tidak berhak mengubah laporan ini');
+    if (!this.isOwnedByPelapor(existing, actor)) throw new UnauthorizedException('Anda tidak berhak mengubah laporan ini');
     if (existing.status !== 'pending') throw new BadRequestException('Laporan yang sudah diproses tidak dapat diubah');
 
     const updateData: Record<string, any> = {};
@@ -272,15 +333,18 @@ export class PelanggaranService {
   // =====================================================
   // DELETE PELANGGARAN
   // =====================================================
-  async deletePelanggaran(id: number, nipGuru: string) {
+  async deletePelanggaran(
+    id: number,
+    actor: { role?: string; guruNip?: string | null; siswaNis?: string | null },
+  ) {
     const supabase = this.supabaseService.getClient();
 
     const { data: existing, error: fetchError } = await supabase
-      .from('pelanggaran').select('id, nip, status')
+      .from('pelanggaran').select('id, nip, siswa_nis, status')
       .eq('id', id).maybeSingle();
 
     if (fetchError || !existing) throw new BadRequestException('Pelanggaran tidak ditemukan');
-    if (existing.nip !== nipGuru)      throw new UnauthorizedException('Anda tidak berhak menghapus laporan ini');
+    if (!this.isOwnedByPelapor(existing, actor)) throw new UnauthorizedException('Anda tidak berhak menghapus laporan ini');
     if (existing.status !== 'pending') throw new BadRequestException('Laporan yang sudah diproses tidak dapat dihapus');
 
     const { error } = await supabase.from('pelanggaran').delete().eq('id', id);

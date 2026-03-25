@@ -164,6 +164,7 @@ export class AuthService {
       role: loginDto.role,
       username: user.username || user.nama,
       ...(loginDto.role === 'guru' && { peran: user.peran }),
+      ...(loginDto.role === 'siswa' && { permissions: user.permissions || [] }),
     };
 
     const token = this.jwtService.sign(payload);
@@ -196,6 +197,7 @@ export class AuthService {
             : undefined,
           role: loginDto.role,
           ...(loginDto.role === 'guru' && { peran: user.peran }),
+          ...(loginDto.role === 'siswa' && { permissions: user.permissions || [] }),
         },
         redirectTo: this.getRedirectPath(loginDto.role),
       },
@@ -278,7 +280,7 @@ export class AuthService {
         case UserRole.SISWA: {
           const { data: siswa, error } = await supabase
             .from('siswa')
-            .select(`nis, nama, coins, streak, last_streak_date, is_active, kelas:kelas_id (id, nama, tingkat, jurusan)`)
+            .select(`nis, nama, coins, streak, last_streak_date, is_active, permissions, kelas:kelas_id (id, nama, tingkat, jurusan)`)
             .eq('nis', userId)
             .single();
 
@@ -296,6 +298,7 @@ export class AuthService {
               streak: siswa.streak,
               lastStreakDate: siswa.last_streak_date,
               isActive: siswa.is_active,
+              permissions: siswa.permissions || [],
             },
           };
         }
@@ -457,6 +460,7 @@ export interface LoginResponse {
       id: string;
       nama: string;
       role: string;
+      permissions?: string[];
     };
     redirectTo: string;
   };
@@ -471,6 +475,7 @@ export interface ProfileResponse {
     nama: string;
     role: string;
     username?: string;
+    permissions?: string[];
     kelas?: {
       id: string;
       nama: string;

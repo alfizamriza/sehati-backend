@@ -11,6 +11,16 @@ export class AbsensiService {
     private streakService: StreakService,
   ) {}
 
+  private normalizePetugas(actor: {
+    guruNip?: string | null;
+    siswaNis?: string | null;
+  }): { guruNip: string | null; siswaNis: string | null } {
+    return {
+      guruNip: actor.guruNip ? String(actor.guruNip).trim() : null,
+      siswaNis: actor.siswaNis ? String(actor.siswaNis).trim() : null,
+    };
+  }
+
   // =====================================================
   // HELPER: GET TODAY'S DATE (timezone-safe, server local)
   // Menggunakan locale date agar tidak terjadi date shift
@@ -174,23 +184,32 @@ export class AbsensiService {
   // =====================================================
   // SCAN QR
   // =====================================================
-  async scanAbsensi(nis: string, nip: string) {
-    return this.prosesAbsensi(nis, nip, 'scan');
+  async scanAbsensi(
+    nis: string,
+    actor: { guruNip?: string | null; siswaNis?: string | null },
+  ) {
+    return this.prosesAbsensi(nis, actor, 'scan');
   }
 
   // =====================================================
   // ABSEN MANUAL SATU SISWA
   // =====================================================
-  async manualAbsensi(nis: string, nip: string) {
-    return this.prosesAbsensi(nis, nip, 'manual');
+  async manualAbsensi(
+    nis: string,
+    actor: { guruNip?: string | null; siswaNis?: string | null },
+  ) {
+    return this.prosesAbsensi(nis, actor, 'manual');
   }
 
   // =====================================================
   // ABSEN MANUAL BULK
   // =====================================================
-  async bulkManualAbsensi(nisList: string[], nip: string) {
+  async bulkManualAbsensi(
+    nisList: string[],
+    actor: { guruNip?: string | null; siswaNis?: string | null },
+  ) {
     const results = await Promise.allSettled(
-      nisList.map((nis) => this.prosesAbsensi(nis, nip, 'manual')),
+      nisList.map((nis) => this.prosesAbsensi(nis, actor, 'manual')),
     );
 
     const berhasil: string[] = [];
@@ -216,10 +235,11 @@ export class AbsensiService {
   // =====================================================
   private async prosesAbsensi(
     nis: string,
-    nip: string,
+    actor: { guruNip?: string | null; siswaNis?: string | null },
     method: 'scan' | 'manual',
   ) {
     const supabase = this.supabaseService.getClient();
+    const { guruNip, siswaNis } = this.normalizePetugas(actor);
     const today = this.getTodayString(); // ← FIXED: was `new Date().toISOString().split('T')[0]`
 
     // 1. Cek hari libur
@@ -282,20 +302,25 @@ export class AbsensiService {
     );
     const totalCoins = coinsReward + streakBonus;
 
+    const insertPayload = {
+      nis,
+      tanggal: today,
+      waktu: new Date().toTimeString().split(' ')[0],
+      coins_reward: coinsReward,
+      streak_bonus: streakBonus,
+      method,
+      ...(guruNip ? { nip: guruNip } : {}),
+      ...(siswaNis ? { siswa_nis: siswaNis } : {}),
+    };
+
     // 6. Insert ke absensi_tumbler
     const { error: insertError } = await supabase
       .from('absensi_tumbler')
-      .insert([{
-        nis,
-        nip,
-        tanggal: today,
-        waktu: new Date().toTimeString().split(' ')[0],
-        coins_reward: coinsReward,
-        streak_bonus: streakBonus,
-        method,
-      }]);
+      .insert([insertPayload]);
 
-    if (insertError) throw new BadRequestException('Gagal mencatat absensi');
+    if (insertError) {
+      throw new BadRequestException(`Gagal mencatat absensi: ${insertError.message}`);
+    }
 
     // 7. Update streak siswa
     await supabase
