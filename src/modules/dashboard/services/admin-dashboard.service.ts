@@ -2,6 +2,19 @@ import { Injectable } from '@nestjs/common';
 import { SupabaseService } from 'src/supabase/supabase.service';
 import { LeaderboardService } from 'src/modules/leaderboard/leaderboard.service';
 
+type MaybeRelation<T extends Record<string, unknown>> = T | T[] | null | undefined;
+
+function getRelationName<T extends { nama?: string }>(
+  relation: MaybeRelation<T>,
+  fallback = '-',
+): string {
+  if (Array.isArray(relation)) {
+    return relation[0]?.nama ?? fallback;
+  }
+
+  return relation?.nama ?? fallback;
+}
+
 @Injectable()
 export class AdminDashboardService {
   constructor(
