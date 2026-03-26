@@ -9,10 +9,11 @@ import { KantinDashboardService } from './services/kantin-dashboard.service';
 import { AdminDashboardService } from './services/admin-dashboard.service';
 import { DatabaseModule } from '../../database/database.module';
 import { StreakModule } from '../streak/streak.module';
+import { LeaderboardModule } from '../leaderboard/leaderboard.module';
 
 
 @Module({
-  imports: [DatabaseModule, StreakModule, ],
+  imports: [DatabaseModule, StreakModule, LeaderboardModule],
   controllers: [SiswaDashboardController, GuruDashboardController, KantinDashboardController, AdminDashboardController],
   providers: [SiswaDashboardService, GuruDashboardService, KantinDashboardService, AdminDashboardService],
   exports: [SiswaDashboardService, GuruDashboardService, KantinDashboardService, AdminDashboardService],

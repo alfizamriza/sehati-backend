@@ -1,20 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { SupabaseService } from 'src/supabase/supabase.service';
-
-type MaybeRelation<T> = T | T[] | null;
-
-const getRelationName = (
-  relation: MaybeRelation<{ nama: string }>,
-  fallback = '-',
-): string => {
-  if (!relation) return fallback;
-  if (Array.isArray(relation)) return relation[0]?.nama ?? fallback;
-  return relation.nama ?? fallback;
-};
+import { LeaderboardService } from 'src/modules/leaderboard/leaderboard.service';
 
 @Injectable()
 export class AdminDashboardService {
-  constructor(private supabaseService: SupabaseService) { }
+  constructor(
+    private supabaseService: SupabaseService,
+    private leaderboardService: LeaderboardService,
+  ) {}
 
   async getDashboardData() {
     // Execute all queries in parallel for better performance
@@ -165,34 +158,17 @@ export class AdminDashboardService {
   // 3. TOP 10 LEADERBOARD
   // ==========================================
   private async getLeaderboard() {
-    const supabase = this.supabaseService.getClient();
+    const siswaList = await this.leaderboardService.getSekolah();
 
-    const { data: siswaList } = await supabase
-      .from('siswa')
-      .select(`
-        nis,
-        nama,
-        coins,
-        streak,
-        foto_url,
-        kelas:kelas_id (
-          nama
-        )
-      `)
-      .eq('is_active', true)
-      .order('coins', { ascending: false })
-      .limit(10);
-
-    // Map data dengan rank
-    return siswaList?.map((siswa, index) => ({
-      rank: index + 1,
+    return siswaList.slice(0, 10).map((siswa) => ({
+      rank: siswa.rank,
       nis: siswa.nis,
       nama: siswa.nama,
-      kelas: getRelationName(siswa.kelas as MaybeRelation<{ nama: string }>),
+      kelas: siswa.kelas || '-',
       coins: siswa.coins || 0,
       streak: siswa.streak || 0,
-      foto_url: siswa.foto_url || null,
-    })) || [];
+      fotoUrl: siswa.fotoUrl || null,
+    }));
   }
 
   // ==========================================
