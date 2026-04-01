@@ -5,6 +5,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsOptional,
   IsString,
   Min,
   ValidateIf,
@@ -25,9 +26,21 @@ export class CreateItemDto {
 }
 
 export class CreateTransaksiDto {
+  @IsOptional()
+  @IsIn(['siswa', 'guru', 'umum'])
+  tipePelanggan?: 'siswa' | 'guru' | 'umum';
+
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  nis: string;
+  nis?: string;
+
+  @IsOptional()
+  @IsString()
+  nip?: string;
+
+  @IsOptional()
+  @IsString()
+  namaUmum?: string;
 
   @IsArray()
   @ArrayMinSize(1)
@@ -35,8 +48,13 @@ export class CreateTransaksiDto {
   @Type(() => CreateItemDto)
   items: CreateItemDto[];
 
-  @IsIn(['voucher', 'tunai'])
-  paymentMethod: 'voucher' | 'tunai';
+  @IsIn(['voucher', 'tunai', 'ngutang'])
+  paymentMethod: 'voucher' | 'tunai' | 'ngutang';
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  nominalDibayar?: number;
 
   @ValidateIf((o) => o.paymentMethod === 'voucher')
   @IsInt()

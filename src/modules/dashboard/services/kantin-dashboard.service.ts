@@ -58,6 +58,7 @@ export interface KantinDashboardResponse {
   transaksiTerbaru: TransaksiTerbaru[];
   stokRendah:       ProdukStokRendah[];
   kantinNama:       string;
+  totalPiutang:     number;
 }
 
 @Injectable()
@@ -259,6 +260,15 @@ export class KantinDashboardService {
     // produk: id, nama, stok, kategori, is_active
     let stokRendah: ProdukStokRendah[] = [];
 
+    // ── 7. Total Piutang (Utang Belum Bayar) ──────────────────────────────
+    const { data: utangRows } = await supabase
+      .from('transaksi')
+      .select('total_bayar, nominal_dibayar')
+      .eq('kantin_id', idNum)
+      .eq('status_pembayaran', 'kasbon');
+      
+    const totalPiutang = (utangRows ?? []).reduce((sum, t) => sum + ((t.total_bayar ?? 0) - (t.nominal_dibayar ?? 0)), 0);
+
     if (produkTerlaris.length > 0) {
       const pIds = produkTerlaris.map((p) => p.produkId);
       const { data: stokRows } = await supabase
@@ -295,6 +305,7 @@ export class KantinDashboardService {
       transaksiTerbaru,
       stokRendah,
       kantinNama,
+      totalPiutang,
     };
   }
 }

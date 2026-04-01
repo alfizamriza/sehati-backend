@@ -51,6 +51,7 @@ export interface TransaksiResult {
   totalHarga: number;
   totalDiskon: number;
   totalBayar: number;
+  nominalDibayar: number;
   coinsUsed: number;
   // Penalti & Reward kemasan
   isByoc: boolean;
@@ -78,6 +79,20 @@ export interface SiswaListItem {
   nis: string;
   nama: string;
   kelas: string;
+  fotoUrl: string | null;
+}
+
+export interface GuruListItem {
+  nip: string;
+  nama: string;
+  peran: string;
+  fotoUrl: string | null;
+}
+
+export interface GuruInfoResult {
+  nip: string;
+  nama: string;
+  peran: string;
   fotoUrl: string | null;
 }
 
@@ -152,6 +167,25 @@ export class TransaksiService {
         fotoUrl: s.foto_url ?? null,
       };
     });
+  }
+
+  // GET /transaksi/guru/list
+  async listGuru(): Promise<GuruListItem[]> {
+    const supabase = this.supabaseService.getClient();
+    const { data, error } = await supabase
+      .from('guru')
+      .select('nip, nama, peran, is_active')
+      .eq('is_active', true)
+      .order('nama', { ascending: true });
+
+    if (error) throw new BadRequestException(`Gagal ambil daftar guru: ${error.message}`);
+
+    return (data ?? []).map((g: any) => ({
+      nip: g.nip,
+      nama: g.nama,
+      peran: g.peran,
+      fotoUrl: null,
+    }));
   }
 
   // ── Helper: ambil nilai penalti & reward dari tabel pengaturan ────────────
@@ -244,6 +278,28 @@ export class TransaksiService {
     };
   }
 
+  // ── 1.b. Lookup Guru ──────────────────────────────────────────────────────
+  async lookupGuru(rawNip: string): Promise<GuruInfoResult> {
+    const supabase = this.supabaseService.getClient();
+    const nip = String(rawNip).trim();
+
+    const { data: guru, error } = await supabase
+      .from('guru')
+      .select('nip, nama, peran, is_active')
+      .eq('nip', nip)
+      .maybeSingle();
+
+    if (error || !guru) throw new NotFoundException('Guru tidak ditemukan');
+    if (!guru.is_active) throw new BadRequestException('Akun guru tidak aktif');
+
+    return {
+      nip: guru.nip,
+      nama: guru.nama,
+      peran: guru.peran,
+      fotoUrl: null,
+    };
+  }
+
   // ── 2. Cek Voucher ────────────────────────────────────────────────────────
   async cekVoucher(dto: CekVoucherDto): Promise<CekVoucherResult> {
     const supabase = this.supabaseService.getClient();
@@ -313,16 +369,38 @@ export class TransaksiService {
   // ── 4. Buat Transaksi ─────────────────────────────────────────────────────
   async createTransaksi(dto: CreateTransaksiDto, kantinId: number): Promise<TransaksiResult> {
     const supabase = this.supabaseService.getClient();
-    const nis = String(dto.nis).trim();
+    
+    const tipePelanggan = dto.tipePelanggan || 'siswa';
 
-    // Validasi siswa
-    const { data: siswa } = await supabase
-      .from('siswa')
-      .select('nis, coins, is_active')
-      .eq('nis', nis)
-      .maybeSingle();
+    // Validasi pembeli
+    let siswaData: any = null;
+    let guruData: any = null;
+    let namaUmum: string | null = null;
+    let fallbackNis = '000000'; // Default jika siswa tidak diwajibkan untuk ngutang/tunai guru/umum
 
-    if (!siswa || !siswa.is_active) throw new NotFoundException('Siswa tidak ditemukan atau tidak aktif');
+    if (tipePelanggan === 'siswa') {
+      if (!dto.nis) throw new BadRequestException('NIS wajib diisi untuk transaksi siswa');
+      const { data: siswa } = await supabase
+        .from('siswa')
+        .select('nis, coins, is_active')
+        .eq('nis', String(dto.nis).trim())
+        .maybeSingle();
+      if (!siswa || !siswa.is_active) throw new NotFoundException('Siswa tidak ditemukan atau tidak aktif');
+      siswaData = siswa;
+    } else if (tipePelanggan === 'guru') {
+      if (!dto.nip) throw new BadRequestException('NIP wajib diisi untuk transaksi guru');
+      const { data: guru } = await supabase
+        .from('guru')
+        .select('nip, is_active')
+        .eq('nip', String(dto.nip).trim())
+        .maybeSingle();
+      if (!guru || !guru.is_active) throw new NotFoundException('Guru tidak ditemukan atau tidak aktif');
+      guruData = guru;
+    } else if (tipePelanggan === 'umum') {
+      if (!dto.namaUmum) throw new BadRequestException('Nama pembeli wajib diisi untuk transaksi umum');
+      namaUmum = dto.namaUmum.trim();
+    }
+
     if (!dto.items || dto.items.length === 0) throw new BadRequestException('Keranjang kosong');
 
     const qtyByProdukId = dto.items.reduce<Record<number, number>>((acc, item) => {
@@ -420,7 +498,7 @@ export class TransaksiService {
     }
 
     // ── Diskon dari voucher ────────────────────────────────────────────────
-    if (!['tunai', 'voucher'].includes(dto.paymentMethod)) {
+    if (!['tunai', 'voucher', 'ngutang'].includes(dto.paymentMethod)) {
       throw new BadRequestException('Metode pembayaran tidak valid');
     }
 
@@ -428,6 +506,9 @@ export class TransaksiService {
     let voucherId: number | null = null;
 
     if (dto.paymentMethod === 'voucher') {
+      if (tipePelanggan !== 'siswa') {
+        throw new BadRequestException('Voucher saat ini hanya berlaku untuk Siswa');
+      }
       if (!dto.voucherId) {
         throw new BadRequestException('voucherId wajib diisi saat paymentMethod = voucher');
       }
@@ -441,7 +522,7 @@ export class TransaksiService {
       const today = new Date().toISOString().split('T')[0];
       if (!voucher || voucher.status !== 'available') throw new BadRequestException('Voucher tidak valid');
       if (voucher.tanggal_berakhir < today || voucher.tanggal_berlaku > today) throw new BadRequestException('Voucher tidak dalam periode berlaku');
-      if (voucher.nis && voucher.nis !== nis) throw new BadRequestException('Voucher ini tidak berlaku untuk siswa ini');
+      if (voucher.nis && voucher.nis !== siswaData.nis) throw new BadRequestException('Voucher ini tidak berlaku untuk siswa ini');
 
       totalDiskon = voucher.tipe_voucher === 'percentage'
         ? Math.round((voucher.nominal_voucher / 100) * totalHarga)
@@ -456,23 +537,45 @@ export class TransaksiService {
     const totalBayar = Math.max(0, totalHarga - totalDiskon);
     const kodeTransaksi = `TRX-${kantinId}-${Date.now()}`;
 
-    // ── INSERT transaksi ───────────────────────────────────────────────────
-    const { data: txRow, error: errTx } = await supabase
-      .from('transaksi')
-      .insert({
+    let nominalDibayar = 0;
+    if (dto.paymentMethod === 'tunai' || dto.paymentMethod === 'voucher') {
+      nominalDibayar = totalBayar;
+    } else if (dto.paymentMethod === 'ngutang') {
+      nominalDibayar = Math.min(dto.nominalDibayar || 0, totalBayar);
+      if (dto.voucherId) {
+        throw new BadRequestException('Voucher tidak bisa digabung dengan metode pembayaran Ngutang');
+      }
+    }
+
+    const payloadTransaksi: any = {
         kode_transaksi: kodeTransaksi,
-        nis,
         kantin_id: kantinId,
+        tipe_pelanggan: tipePelanggan,
         total_harga: totalHarga,
         total_diskon: totalDiskon,
         total_bayar: totalBayar,
+        nominal_dibayar: nominalDibayar,
         coins_used: coinsUsed,
         payment_method: dto.paymentMethod,
+        status_pembayaran: nominalDibayar >= totalBayar ? 'lunas' : 'kasbon',
         voucher_id: voucherId,
         is_byoc: isByocGlobal,
-        coins_reward: coinsRewardTotal,
-        coins_penalty: coinsPenaltyTotal,
-      })
+        coins_reward: tipePelanggan === 'siswa' ? coinsRewardTotal : 0,
+        coins_penalty: tipePelanggan === 'siswa' ? coinsPenaltyTotal : 0,
+    };
+
+    if (tipePelanggan === 'siswa') {
+      payloadTransaksi.nis = siswaData.nis;
+    } else if (tipePelanggan === 'guru') {
+      payloadTransaksi.nip = guruData.nip;
+    } else if (tipePelanggan === 'umum') {
+      payloadTransaksi.nama_umum = namaUmum;
+    }
+
+    // ── INSERT transaksi ───────────────────────────────────────────────────
+    const { data: txRow, error: errTx } = await supabase
+      .from('transaksi')
+      .insert(payloadTransaksi)
       .select('id, kode_transaksi, created_at')
       .single();
 
@@ -507,26 +610,27 @@ export class TransaksiService {
       }
     }
 
-    // ── Update coins siswa ─────────────────────────────────────────────────
-    // Penalti kemasan mengurangi koin, Reward kemasan menambah koin.
-    const coinsAwal = siswa.coins ?? 0;
-    let coinsFinal = coinsAwal;
+    // ── Update coins siswa (Hanya jika tipe pelanggan = siswa) ──────────────
+    if (tipePelanggan === 'siswa') {
+      const coinsAwal = siswaData.coins ?? 0;
+      let coinsFinal = coinsAwal;
 
-    // Kurangi penalti dulu
-    if (coinsPenaltyTotal > 0) {
-      coinsFinal = Math.max(0, coinsFinal - coinsPenaltyTotal);
-    }
+      // Kurangi penalti dulu
+      if (coinsPenaltyTotal > 0) {
+        coinsFinal = Math.max(0, coinsFinal - coinsPenaltyTotal);
+      }
 
-    // Tambah reward
-    if (coinsRewardTotal > 0) {
-      coinsFinal = coinsFinal + coinsRewardTotal;
-    }
+      // Tambah reward
+      if (coinsRewardTotal > 0) {
+        coinsFinal = coinsFinal + coinsRewardTotal;
+      }
 
-    if (coinsPenaltyTotal > 0 || coinsRewardTotal > 0) {
-      await supabase
-        .from('siswa')
-        .update({ coins: coinsFinal, updated_at: new Date().toISOString() })
-        .eq('nis', nis);
+      if (coinsPenaltyTotal > 0 || coinsRewardTotal > 0) {
+        await supabase
+          .from('siswa')
+          .update({ coins: coinsFinal, updated_at: new Date().toISOString() })
+          .eq('nis', siswaData.nis);
+      }
     }
 
     // ── Tandai voucher terpakai ────────────────────────────────────────────
@@ -543,13 +647,82 @@ export class TransaksiService {
       totalHarga,
       totalDiskon,
       totalBayar,
+      nominalDibayar,
       coinsUsed,
       isByoc: isByocGlobal,
-      coinsReward: coinsRewardTotal,
-      coinsPenaltyTotal,
+      coinsReward: tipePelanggan === 'siswa' ? coinsRewardTotal : 0,
+      coinsPenaltyTotal: tipePelanggan === 'siswa' ? coinsPenaltyTotal : 0,
       coinsPenaltyDetail,
       paymentMethod: dto.paymentMethod,
       createdAt: txRow.created_at,
+    };
+  }
+
+  // ── 5. Pengelolaan Kasbon (Utang) ─────────────────────────────────────────
+
+  async getDaftarKasbon(kantinId: number) {
+    const supabase = this.supabaseService.getClient();
+    const { data, error } = await supabase
+      .from('transaksi')
+      .select('id, kode_transaksi, tipe_pelanggan, nis, nip, nama_umum, total_bayar, nominal_dibayar, created_at, siswa(nama), guru(nama)')
+      .eq('kantin_id', kantinId)
+      .eq('status_pembayaran', 'kasbon')
+      .order('created_at', { ascending: false });
+
+    if (error) throw new BadRequestException(`Gagal mengambil data kasbon: ${error.message}`);
+    
+    return (data || []).map((t: any) => ({
+      id: t.id,
+      kodeTransaksi: t.kode_transaksi,
+      tipePelanggan: t.tipe_pelanggan,
+      identitas: t.tipe_pelanggan === 'siswa' ? t.nis : t.tipe_pelanggan === 'guru' ? t.nip : t.nama_umum,
+      namaPembeli: t.tipe_pelanggan === 'siswa' ? t.siswa?.nama : t.tipe_pelanggan === 'guru' ? t.guru?.nama : t.nama_umum,
+      totalTagihan: t.total_bayar,
+      sudahDibayar: t.nominal_dibayar,
+      sisaUtang: t.total_bayar - t.nominal_dibayar,
+      tanggal: t.created_at,
+    }));
+  }
+
+  async lunasiKasbon(kantinId: number, transaksiId: number, nominalCicilan: number) {
+    if (nominalCicilan <= 0) throw new BadRequestException('Nominal bayar harus lebih dari 0');
+    
+    const supabase = this.supabaseService.getClient();
+    
+    // Ambil data transaksi kasbon
+    const { data: tx, error: errTx } = await supabase
+      .from('transaksi')
+      .select('id, total_bayar, nominal_dibayar, status_pembayaran, kantin_id')
+      .eq('id', transaksiId)
+      .eq('kantin_id', kantinId)
+      .single();
+      
+    if (errTx || !tx) throw new NotFoundException('Transaksi kasbon tidak ditemukan');
+    if (tx.status_pembayaran !== 'kasbon') throw new BadRequestException('Transaksi ini bukan kasbon atau sudah lunas');
+    
+    const sisaUtangLama = tx.total_bayar - (tx.nominal_dibayar || 0);
+    const uangDibayar = Math.min(nominalCicilan, sisaUtangLama); // jangan berlebih
+    const totalDibayarBaru = (tx.nominal_dibayar || 0) + uangDibayar;
+    const statusBaru = totalDibayarBaru >= tx.total_bayar ? 'lunas' : 'kasbon';
+    
+    const { data, error } = await supabase
+      .from('transaksi')
+      .update({ 
+        nominal_dibayar: totalDibayarBaru,
+        status_pembayaran: statusBaru
+      })
+      .eq('id', transaksiId)
+      .select()
+      .single();
+      
+    if (error) throw new BadRequestException(`Gagal mencatat pembayaran: ${error.message}`);
+    
+    return {
+      transaksiId: data.id,
+      statusPembayaran: data.status_pembayaran,
+      totalBayar: data.total_bayar,
+      nominalDibayar: data.nominal_dibayar,
+      sisaUtang: data.total_bayar - data.nominal_dibayar
     };
   }
 }

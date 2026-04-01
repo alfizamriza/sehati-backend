@@ -27,6 +27,19 @@ export class TransaksiController {
     return { success: true, data };
   }
 
+  @Get('guru/list')
+  async listGuru() {
+    const data = await this.transaksiService.listGuru();
+    return { success: true, data };
+  }
+
+  @Get('guru')
+  async lookupGuru(@Query('nip') nip: string) {
+    if (!nip) throw new Error('NIP wajib diisi');
+    const data = await this.transaksiService.lookupGuru(nip);
+    return { success: true, data };
+  }
+
   /** GET /transaksi/voucher?kode=HEMAT5K&nis=1234567
    *  Validasi kode voucher yang diketik manual
    */
@@ -59,6 +72,25 @@ export class TransaksiController {
   ) {
     const kantinId = this.extractKantinId(req.user);
     const data = await this.transaksiService.createTransaksi(dto, kantinId);
+    return { success: true, data };
+  }
+
+  @Get('kasbon')
+  async getDaftarKasbon(@Request() req: any) {
+    const kantinId = this.extractKantinId(req.user);
+    const data = await this.transaksiService.getDaftarKasbon(kantinId);
+    return { success: true, data };
+  }
+
+  @Post('kasbon/:id/bayar')
+  async lunasiKasbon(
+    @Request() req: any,
+    @Body('nominalBayar') nominalBayar: number,
+  ) {
+    const kantinId = this.extractKantinId(req.user);
+    const transaksiId = Number(req.params.id);
+    if (isNaN(transaksiId)) throw new Error('ID Transaksi tidak valid');
+    const data = await this.transaksiService.lunasiKasbon(kantinId, transaksiId, nominalBayar);
     return { success: true, data };
   }
 
