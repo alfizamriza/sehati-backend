@@ -1,0 +1,17 @@
+scenario,role,endpoint,concurrency,maxRequests,successRate,errorRate,throughput,latencyAvgMs,latencyP95Ms,latencyP99Ms,completed,failed,statusCounts
+Beban Rendah,siswa,/api/dashboard/siswa,1,30,3.33,96.67,6.58,2721.99,2721.99,2721.99,1,29,200=1
+Beban Rendah,guru,/api/guru/dashboard/profil,1,30,0.00,100.00,245.90,0.00,0.00,0.00,0,30,
+Beban Rendah,admin,/api/admin/dashboard,1,30,0.00,100.00,220.59,0.00,0.00,0.00,0,30,
+Beban Rendah,kantin,/api/kantin/dashboard,1,30,0.00,100.00,260.87,0.00,0.00,0.00,0,30,
+Beban Sedang,siswa,/api/dashboard/siswa,5,50,0.00,100.00,458.72,0.00,0.00,0.00,0,50,
+Beban Sedang,guru,/api/guru/dashboard/profil,5,50,0.00,100.00,480.77,0.00,0.00,0.00,0,50,
+Beban Sedang,admin,/api/admin/dashboard,5,50,0.00,100.00,505.05,0.00,0.00,0.00,0,50,
+Beban Sedang,kantin,/api/kantin/dashboard,5,50,0.00,100.00,446.43,0.00,0.00,0.00,0,50,
+Beban Tinggi,siswa,/api/dashboard/siswa,10,100,0.00,100.00,729.93,0.00,0.00,0.00,0,100,
+Beban Tinggi,guru,/api/guru/dashboard/profil,10,100,0.00,100.00,61.01,0.00,0.00,0.00,0,100,
+Beban Tinggi,admin,/api/admin/dashboard,10,100,0.00,100.00,36.58,0.00,0.00,0.00,0,100,
+Beban Tinggi,kantin,/api/kantin/dashboard,10,100,0.00,100.00,38.68,0.00,0.00,0.00,0,100,
+Beban Sangat Tinggi,siswa,/api/dashboard/siswa,20,200,100.00,0.00,6.31,2952.16,3572.77,3670.62,140,0,200=140
+Beban Sangat Tinggi,guru,/api/guru/dashboard/profil,20,200,0.00,100.00,71.66,0.00,0.00,0.00,0,200,
+Beban Sangat Tinggi,admin,/api/admin/dashboard,20,200,0.00,100.00,68.45,0.00,0.00,0.00,0,200,
+Beban Sangat Tinggi,kantin,/api/kantin/dashboard,20,200,0.00,100.00,51.95,0.00,0.00,0.00,0,200,
