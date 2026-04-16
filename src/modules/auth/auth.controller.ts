@@ -96,7 +96,7 @@ export class AuthController {
     const cookieDomain = process.env.AUTH_COOKIE_DOMAIN || undefined;
     const baseOptions = {
       httpOnly: true,
-      sameSite: 'lax' as const,
+      sameSite: (isSecure ? 'none' : 'lax') as 'none' | 'lax' | 'strict',
       secure: isSecure,
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
@@ -117,7 +117,7 @@ export class AuthController {
       process.env.NODE_ENV === 'production';
     const cookieDomain = process.env.AUTH_COOKIE_DOMAIN || undefined;
     const clearOptions = {
-      sameSite: 'lax' as const,
+      sameSite: (isSecure ? 'none' : 'lax') as 'none' | 'lax' | 'strict',
       secure: isSecure,
       path: '/',
       ...(cookieDomain ? { domain: cookieDomain } : {}),
