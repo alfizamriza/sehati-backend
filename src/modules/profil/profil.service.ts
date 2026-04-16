@@ -3,6 +3,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from 'src/supabase/supabase.service';
 import { StreakService } from 'src/modules/streak/streak.service';
+import { LeaderboardService } from 'src/modules/leaderboard/leaderboard.service';
 import * as bcrypt from 'bcrypt';
 import { convertToRomanNumeral } from 'src/common/helpers/number.helper';
 
@@ -78,6 +79,7 @@ export class ProfilService {
   constructor(
     private supabaseService: SupabaseService,
     private streakService: StreakService,
+    private leaderboardService: LeaderboardService,
   ) { }
 
   // ============================================
@@ -114,68 +116,73 @@ export class ProfilService {
   async getProfil(nis: string): Promise<ProfilResponse> {
     const supabase = this.supabaseService.getClient();
     const nisStr = String(nis).trim();
-    const streakData = await this.streakService.calculateStreak(nisStr);
 
-    // 1. Data siswa + kelas
-    const { data: siswa, error: errSiswa } = await supabase
-      .from('siswa')
-      .select('nis, nama, kelas_id, coins, streak, last_streak_date, created_at, foto_url')
-      .eq('nis', nisStr)
-      .maybeSingle();
+    // Jalankan SEMUA query berat secara PARALEL untuk mencegah API Timeout!
+    const [
+      leaderboardSekolah,
+      leaderboardKelas,
+      siswaRes,
+      tumblerRes,
+      pelanggaranRes,
+      uaRes,
+      voucherRes,
+      showcaseRes,
+    ] = await Promise.all([
+      this.leaderboardService.getSekolah(nisStr),
+      this.leaderboardService.getKelasSaya(nisStr),
+      supabase
+        .from('siswa')
+        .select('nis, nama, kelas_id, coins, streak, last_streak_date, created_at, foto_url, kelas:kelas_id(nama, tingkat)')
+        .eq('nis', nisStr)
+        .maybeSingle(),
+      supabase.from('absensi_tumbler').select('id', { count: 'exact', head: true }).eq('nis', nisStr),
+      supabase.from('pelanggaran').select('id', { count: 'exact', head: true }).eq('nis', nisStr).eq('status', 'approved'),
+      supabase
+        .from('user_achievement')
+        .select('unlocked_at, achievement:achievement_id (id, nama, deskripsi, tipe, icon, badge_color)')
+        .eq('nis', nisStr)
+        .order('unlocked_at', { ascending: false }),
+      supabase
+        .from('voucher')
+        .select('id, kode_voucher, nama_voucher, tanggal_berlaku, tanggal_berakhir, nominal_voucher, tipe_voucher, status, used_at')
+        .eq('nis', nisStr)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('achievement_showcase_note')
+        .select(`id, achievement_id, note_text, expires_at, created_at, achievement:achievement_id (id, nama, icon, badge_color)`)
+        .eq('nis', nisStr)
+        .eq('is_active', true)
+        .gt('expires_at', new Date().toISOString())
+        .maybeSingle(),
+    ]);
+
+    const { data: siswa, error: errSiswa } = siswaRes;
 
     if (errSiswa || !siswa) {
       throw new NotFoundException('Siswa tidak ditemukan');
     }
 
-    // 2. Data kelas
+    const meSekolah = leaderboardSekolah.find(s => s.nis === nisStr);
+    const meKelas = leaderboardKelas.find(s => s.nis === nisStr);
+
+    const rankingSekolah = meSekolah ? meSekolah.rank : 0;
+    const rankingKelas = meKelas ? meKelas.rank : 0;
+    const effectiveStreak = meSekolah ? meSekolah.streak : 0;
+
     let kelasLabel = '-';
     let tingkat = 0;
     let namaKelas = '-';
-    if (siswa.kelas_id) {
-      const { data: kelas } = await supabase
-        .from('kelas')
-        .select('nama, tingkat')
-        .eq('id', siswa.kelas_id)
-        .maybeSingle();
-      if (kelas) {
-        tingkat = kelas.tingkat;
-        namaKelas = kelas.nama;
-        kelasLabel = `${convertToRomanNumeral(kelas.tingkat)} ${kelas.nama}`;
+
+    if (siswa.kelas) {
+      const k = Array.isArray(siswa.kelas) ? siswa.kelas[0] : siswa.kelas;
+      if (k) {
+        tingkat = (k as any).tingkat;
+        namaKelas = (k as any).nama;
+        kelasLabel = `${convertToRomanNumeral(tingkat)} ${namaKelas}`;
       }
     }
 
-    // 3. Ranking kelas (siswa dengan coins lebih banyak di kelas yang sama)
-    let rankingKelas = 1;
-    if (siswa.kelas_id) {
-      const { data: kelasmates } = await supabase
-        .from('siswa')
-        .select('nis, coins')
-        .eq('kelas_id', siswa.kelas_id)
-        .eq('is_active', true);
-      rankingKelas = (kelasmates || []).filter((s) => (s.coins ?? 0) > (siswa.coins ?? 0)).length + 1;
-    }
-
-    // 4. Ranking sekolah
-    const { data: allSiswa } = await supabase
-      .from('siswa')
-      .select('nis, coins')
-      .eq('is_active', true);
-    const rankingSekolah = (allSiswa || []).filter((s) => (s.coins ?? 0) > (siswa.coins ?? 0)).length + 1;
-
-    // 5. Total tumbler & pelanggaran
-    const [tumblerRes, pelanggaranRes] = await Promise.all([
-      supabase.from('absensi_tumbler').select('id', { count: 'exact', head: true }).eq('nis', nisStr),
-      supabase.from('pelanggaran').select('id', { count: 'exact', head: true }).eq('nis', nisStr).eq('status', 'approved'),
-    ]);
-
-    // 6. Achievements yang sudah di-unlock
-    const { data: uaRows } = await supabase
-      .from('user_achievement')
-      .select('unlocked_at, achievement:achievement_id (id, nama, deskripsi, tipe, icon, badge_color)')
-      .eq('nis', nisStr)
-      .order('unlocked_at', { ascending: false });
-
-    const achievements: ProfilAchievement[] = (uaRows || []).map((ua: any) => {
+    const achievements: ProfilAchievement[] = (uaRes.data || []).map((ua: any) => {
       const ach = Array.isArray(ua.achievement) ? ua.achievement[0] : ua.achievement;
       return {
         id: ach?.id ?? 0,
@@ -188,17 +195,10 @@ export class ProfilService {
       };
     });
 
-    // 7. Voucher milik siswa
-    const { data: voucherRows } = await supabase
-      .from('voucher')
-      .select('id, kode_voucher, nama_voucher, tanggal_berlaku, tanggal_berakhir, nominal_voucher, tipe_voucher, status, used_at')
-      .eq('nis', nisStr)
-      .order('created_at', { ascending: false });
-
     const today = this.getTodayWIB();
     const expireIds: string[] = [];
 
-    const vouchers: ProfilVoucher[] = (voucherRows || []).map((v: any) => {
+    const vouchers: ProfilVoucher[] = (voucherRes.data || []).map((v: any) => {
       const status = (v.status ?? 'available') as string;
       const isExpired = status === 'available' && v.tanggal_berakhir && v.tanggal_berakhir < today;
       if (isExpired && v.id) expireIds.push(v.id);
@@ -216,26 +216,11 @@ export class ProfilService {
       };
     });
 
-    const { data: showcaseRow } = await supabase
-      .from('achievement_showcase_note')
-      .select(`
-        id,
-        achievement_id,
-        note_text,
-        expires_at,
-        created_at,
-        achievement:achievement_id (
-          id, nama, icon, badge_color
-        )
-      `)
-      .eq('nis', nisStr)
-      .eq('is_active', true)
-      .gt('expires_at', new Date().toISOString())
-      .maybeSingle();
-
+    const showcaseRow = showcaseRes.data;
     const showcaseAchievement = Array.isArray(showcaseRow?.achievement)
       ? showcaseRow.achievement[0]
       : showcaseRow?.achievement;
+    
     const showcaseNote: ProfilShowcaseNote | null = showcaseRow
       ? {
           id: String(showcaseRow.id ?? ''),
@@ -274,7 +259,7 @@ export class ProfilService {
         tingkat,
         namaKelas,
         coins: siswa.coins ?? 0,
-        streak: streakData.currentStreak,
+        streak: effectiveStreak,
         lastStreakDate: siswa.last_streak_date ?? null,
         joinDate: siswa.created_at ?? '-',
         fotoUrl: siswa.foto_url ?? null,
