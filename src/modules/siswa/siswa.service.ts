@@ -201,6 +201,7 @@ export class SiswaService {
         nama,
         coins,
         streak,
+        last_streak_date,
         is_active,
         permissions,
         created_at,
@@ -216,10 +217,11 @@ export class SiswaService {
       throw new BadRequestException('Gagal mengambil data siswa');
     }
 
+    const streakMap = await this.streakService.calculateEffectiveStreaksInBatch(siswaList);
+
     // Format response
-    const formatted = await Promise.all(siswaList.map(async (siswa) => {
+    const formatted = siswaList.map((siswa) => {
       const kelas = this.normalizeKelas(siswa.kelas as KelasRelation);
-      const streakData = await this.streakService.calculateStreak(siswa.nis);
       return {
         nis: siswa.nis,
         nama: siswa.nama,
@@ -228,10 +230,10 @@ export class SiswaService {
         statusAktif: siswa.is_active,
         permissions: siswa.permissions || [],
         coins: siswa.coins,
-        streak: streakData.currentStreak,
+        streak: streakMap.get(siswa.nis) ?? 0,
         createdAt: siswa.created_at,
       };
-    }));
+    });
 
     return {
       success: true,

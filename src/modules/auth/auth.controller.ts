@@ -1,6 +1,6 @@
-import { Controller, Post, Body, Get, UseGuards, Req, Query } from '@nestjs/common';
+import { Controller, Post, Body, Get, UseGuards, Req, Query, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterAdminDto } from './dto/register-admin.dto';
@@ -21,11 +21,13 @@ export class AuthController {
   @ApiOperation({ summary: 'Login user' })
   @ApiResponse({ status: 200, description: 'Login successful' })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
-  async login(@Body() loginDto: LoginDto, @Req() req: Request) {
-    return this.authService.login(loginDto, {
+  async login(@Body() loginDto: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.login(loginDto, {
       ipAddress: this.getIpAddress(req),
       userAgent: req.get('user-agent') ?? null,
     });
+    this.setAuthCookies(req, res, result?.data?.token, result?.data?.user?.role);
+    return result;
   }
 
   @Public()
@@ -51,7 +53,8 @@ export class AuthController {
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Logout user' })
   @ApiResponse({ status: 200, description: 'Logout successful' })
-  async logout() {
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    this.clearAuthCookies(req, res);
     return this.authService.logout();
   }
 
@@ -81,5 +84,52 @@ export class AuthController {
     }
 
     return req.ip ?? req.socket.remoteAddress ?? null;
+  }
+
+  private setAuthCookies(req: Request, res: Response, token?: string, role?: string) {
+    if (!token) return;
+
+    const isSecure =
+      req.secure ||
+      req.get('x-forwarded-proto') === 'https' ||
+      process.env.NODE_ENV === 'production';
+    const cookieDomain = process.env.AUTH_COOKIE_DOMAIN || undefined;
+    const baseOptions = {
+      httpOnly: true,
+      sameSite: 'lax' as const,
+      secure: isSecure,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+      ...(cookieDomain ? { domain: cookieDomain } : {}),
+    };
+
+    res.cookie('auth_token', token, baseOptions);
+    res.cookie('auth_role', role ?? '', {
+      ...baseOptions,
+      httpOnly: false,
+    });
+  }
+
+  private clearAuthCookies(req: Request, res: Response) {
+    const isSecure =
+      req.secure ||
+      req.get('x-forwarded-proto') === 'https' ||
+      process.env.NODE_ENV === 'production';
+    const cookieDomain = process.env.AUTH_COOKIE_DOMAIN || undefined;
+    const clearOptions = {
+      sameSite: 'lax' as const,
+      secure: isSecure,
+      path: '/',
+      ...(cookieDomain ? { domain: cookieDomain } : {}),
+    };
+
+    res.clearCookie('auth_token', {
+      ...clearOptions,
+      httpOnly: true,
+    });
+    res.clearCookie('auth_role', {
+      ...clearOptions,
+      httpOnly: false,
+    });
   }
 }

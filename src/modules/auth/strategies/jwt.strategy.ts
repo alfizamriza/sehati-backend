@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
+import type { Request } from 'express';
 import { UserRole } from '../../../common/enums/user-role.enum';
 
 @Injectable()
@@ -10,7 +11,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const secret = configService.get('JWT_SECRET') || 'your-super-secret-key';
     
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        (req: Request) => req?.cookies?.auth_token ?? this.getCookieFromHeader(req, 'auth_token'),
+      ]),
       ignoreExpiration: false,
       secretOrKey: secret,
     });
@@ -26,5 +30,20 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       ...(payload.peran && { peran: payload.peran }),
       ...(payload.permissions && { permissions: payload.permissions }),
     };
+  }
+
+  private getCookieFromHeader(req: Request | undefined, name: string): string | null {
+    const rawCookie = req?.headers?.cookie;
+    if (!rawCookie) return null;
+
+    const match = rawCookie
+      .split(';')
+      .map((chunk) => chunk.trim())
+      .find((chunk) => chunk.startsWith(`${name}=`));
+
+    if (!match) return null;
+
+    const value = match.slice(name.length + 1);
+    return value ? decodeURIComponent(value) : null;
   }
 }

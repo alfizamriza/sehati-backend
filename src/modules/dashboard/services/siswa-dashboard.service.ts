@@ -1,6 +1,8 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { SupabaseService } from 'src/supabase/supabase.service';
 import { StreakService } from 'src/modules/streak/streak.service';
+import { LeaderboardService } from 'src/modules/leaderboard/leaderboard.service';
+import { RequestCache } from 'src/common/utils/request-cache';
 
 interface SchoolDay { date: string; label: string }
 
@@ -21,9 +23,13 @@ export interface ComplianceItem {
 
 @Injectable()
 export class SiswaDashboardService {
+  private static readonly DASHBOARD_CACHE_TTL_MS = 10_000;
+  private static readonly DASHBOARD_STALE_TTL_MS = 60_000;
+
   constructor(
     private supabaseService: SupabaseService,
     private streakService: StreakService,
+    private leaderboardService: LeaderboardService,
   ) { }
 
   private convertToRomanNumeral(num: number): string {
@@ -51,39 +57,72 @@ export class SiswaDashboardService {
     year?: number,
     month?: number,
   ) {
-    const [
-      siswaData, streakData, rankData,
-      pelanggaranCount, leaderboardData, historyData, calendarDays,
-    ] = await Promise.all([
-      this.getSiswaProfile(nis),
-      this.streakService.calculateStreak(nis),
-      this.getCoinRank(nis),
-      this.getPelanggaranCount(nis),
-      this.getLeaderboard(nis),
-      this.getRecentHistory(nis),
-      this.getCalendarData(nis, mode, year, month),
-    ]);
+    const cacheKey = `dashboard:siswa:${nis}:${mode}:${year ?? 'current'}:${month ?? 'current'}`;
 
-    const complianceChart: ComplianceItem[] = calendarDays.map((d) => ({
-      name: d.label, date: d.date,
-      plastic: d.plastikCount, compliance: d.hadir ? 100 : 0,
-      isToday: d.isToday,
-    }));
+    return RequestCache.getOrSet(
+      cacheKey,
+      SiswaDashboardService.DASHBOARD_CACHE_TTL_MS,
+      async () => {
+        const [
+          siswaData, streakData, pelanggaranCount, leaderboardDataRaw, historyData, calendarDays,
+        ] = await Promise.all([
+          this.getSiswaProfile(nis),
+          this.streakService.calculateStreak(nis),
+          this.getPelanggaranCount(nis),
+          this.leaderboardService.getSekolah(nis),
+          this.getRecentHistory(nis),
+          this.getCalendarData(nis, mode, year, month),
+        ]);
 
-    return {
-      success: true,
-      data: {
-        profile: siswaData,
-        streak: {
-          current: streakData.currentStreak,
-          isActiveToday: streakData.isStreakActiveToday,
-          shouldShowFaded: streakData.shouldShowFaded,
-        },
-        ranking: rankData, pelanggaran: pelanggaranCount,
-        leaderboard: leaderboardData, recentHistory: historyData,
-        complianceChart, calendarDays,
+        const myRankEntry = leaderboardDataRaw.find(s => s.nis === nis);
+        const rankData = { position: myRankEntry?.rank ?? 0, totalSiswa: leaderboardDataRaw.length };
+
+        const leaderboardData = leaderboardDataRaw.slice(0, 3).map((item, index) => ({
+          rank: item.rank,
+          nis: item.nis,
+          nama: item.nama,
+          kelas: item.kelas,
+          coins: item.coins,
+          streak: item.streak,
+          medal: index === 0 ? 'gold' : index === 1 ? 'silver' : 'bronze',
+          isMe: item.is_me,
+          foto_url: item.fotoUrl,
+        }));
+
+        if (myRankEntry) {
+          siswaData.coins = myRankEntry.coins;
+          siswaData.streak = myRankEntry.streak;
+          siswaData.kelas = myRankEntry.kelas;
+        }
+
+        const complianceChart: ComplianceItem[] = calendarDays.map((d) => ({
+          name: d.label, date: d.date,
+          plastic: d.plastikCount, compliance: d.hadir ? 100 : 0,
+          isToday: d.isToday,
+        }));
+
+        return {
+          success: true,
+          data: {
+            profile: siswaData,
+            streak: {
+              current: streakData.currentStreak,
+              isActiveToday: streakData.isStreakActiveToday,
+              shouldShowFaded: streakData.shouldShowFaded,
+            },
+            ranking: rankData, pelanggaran: pelanggaranCount,
+            leaderboard: leaderboardData, recentHistory: historyData,
+            complianceChart, calendarDays,
+          },
+        };
       },
-    };
+      {
+        staleTtlMs: SiswaDashboardService.DASHBOARD_STALE_TTL_MS,
+        onError: (error) => {
+          console.warn('[SiswaDashboardService] Falling back to stale dashboard cache:', error);
+        },
+      },
+    );
   }
 
   // =====================================================
@@ -245,6 +284,35 @@ export class SiswaDashboardService {
 
   private formatDateLocal(d: Date) {
     const y = d.getFullYear();
+
+  // =====================================================
+  // DATE HELPERS
+  // =====================================================
+
+  /**
+   * FIX 3: Selalu ambil SELURUH bulan, bukan sampai hari ini.
+   * Frontend yang bertanggung jawab menyembunyikan / greying out
+   * tanggal masa depan — backend cukup kirim semua data termasuk
+   * tanggal libur yang belum terjadi.
+   */
+  private getMonthDays(year?: number, month?: number): SchoolDay[] {
+    const now = new Date();
+    const y = year ?? now.getFullYear();
+    const m = month ?? (now.getMonth() + 1); // 1-based
+
+    // Selalu ambil seluruh hari dalam bulan (bukan sampai hari ini)
+    const totalDays = new Date(y, m, 0).getDate();
+
+    const days: SchoolDay[] = [];
+    for (let d = 1; d <= totalDays; d++) {
+      const dt = new Date(y, m - 1, d);
+      days.push({ date: this.formatDateLocal(dt), label: String(d) });
+    }
+    return days;
+  }
+
+  private formatDateLocal(d: Date) {
+    const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
@@ -264,33 +332,6 @@ export class SiswaDashboardService {
       streak: (data as any).streak || 0,
       kelas: kelas ? `${tingkatRoman}-${(kelas as any).nama}` : '-',
     };
-  }
-
-  private async getCoinRank(nis: string) {
-    const supabase = this.supabaseService.getClient();
-    const { data } = await supabase.from('siswa').select('nis')
-      .eq('is_active', true).order('coins', { ascending: false });
-    const index = data?.findIndex((s) => s.nis === nis) ?? -1;
-    return { position: index + 1, totalSiswa: data?.length || 0 };
-  }
-
-  private async getLeaderboard(currentNis: string) {
-    const supabase = this.supabaseService.getClient();
-    const { data: topSiswa } = await supabase.from('siswa')
-      .select('nis, nama, coins, streak, foto_url, kelas:kelas_id (nama, tingkat)')
-      .eq('is_active', true).order('coins', { ascending: false }).limit(3);
-    return (topSiswa ?? []).map((item, index) => {
-      const kelas = Array.isArray(item.kelas) ? item.kelas[0] : item.kelas;
-      const tingkatRoman = kelas ? this.convertToRomanNumeral((kelas as any).tingkat) : '';
-      return {
-        rank: index + 1, nis: item.nis, nama: item.nama,
-        kelas: kelas ? `${tingkatRoman}-${(kelas as any).nama}` : '-',
-        coins: (item as any).coins || 0, streak: (item as any).streak || 0,
-        medal: index === 0 ? 'gold' : index === 1 ? 'silver' : 'bronze',
-        isMe: item.nis === currentNis,
-        foto_url: (item as any).foto_url || null,
-      };
-    });
   }
 
   private async getPelanggaranCount(nis: string) {

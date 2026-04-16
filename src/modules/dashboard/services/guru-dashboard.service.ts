@@ -1,8 +1,12 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { SupabaseService } from 'src/supabase/supabase.service';
+import { RequestCache } from 'src/common/utils/request-cache';
 
 @Injectable()
 export class GuruDashboardService {
+  private static readonly PROFILE_CACHE_TTL_MS = 30_000;
+  private static readonly PROFILE_STALE_TTL_MS = 120_000;
+
   constructor(private supabaseService: SupabaseService) { }
 
   // =====================================================
@@ -62,43 +66,55 @@ export class GuruDashboardService {
   // GET PROFIL GURU
   // =====================================================
   async getProfilGuru(nip: string) {
-    const supabase = this.supabaseService.getClient();
+    return RequestCache.getOrSet(
+      `dashboard:guru:profil:${nip}`,
+      GuruDashboardService.PROFILE_CACHE_TTL_MS,
+      async () => {
+        const supabase = this.supabaseService.getClient();
 
-    const { data: guru, error } = await supabase
-      .from('guru')
-      .select(`
-        nip, nama, mata_pelajaran, peran, is_active,
-        kelas_wali:kelas_wali_id (id, nama, tingkat, jenjang)
-      `)
-      .eq('nip', nip)
-      .eq('is_active', true)
-      .maybeSingle();
+        const { data: guru, error } = await supabase
+          .from('guru')
+          .select(`
+            nip, nama, mata_pelajaran, peran, is_active,
+            kelas_wali:kelas_wali_id (id, nama, tingkat, jenjang)
+          `)
+          .eq('nip', nip)
+          .eq('is_active', true)
+          .maybeSingle();
 
-    if (error || !guru) throw new BadRequestException('Data guru tidak ditemukan');
+        if (error || !guru) throw new BadRequestException('Data guru tidak ditemukan');
 
-    const kelasWali = Array.isArray(guru.kelas_wali) ? guru.kelas_wali[0] : guru.kelas_wali;
-    const tingkatRoman = kelasWali ? this.convertToRomanNumeral(kelasWali.tingkat) : '';
+        const kelasWali = Array.isArray(guru.kelas_wali) ? guru.kelas_wali[0] : guru.kelas_wali;
+        const tingkatRoman = kelasWali ? this.convertToRomanNumeral(kelasWali.tingkat) : '';
 
-    return {
-      success: true,
-      data: {
-        nip: guru.nip,
-        nama: guru.nama,
-        mataPelajaran: guru.mata_pelajaran,
-        peran: guru.peran,
-        isKonselor: guru.peran === 'konselor',
-        isWaliKelas: guru.peran === 'wali_kelas',
-        kelasWali: kelasWali
-          ? {
-            id: kelasWali.id,
-            nama: kelasWali.nama,
-            tingkat: tingkatRoman,
-            jenjang: kelasWali.jenjang,
-            label: `${tingkatRoman} ${kelasWali.nama}`,
-          }
-          : null,
+        return {
+          success: true,
+          data: {
+            nip: guru.nip,
+            nama: guru.nama,
+            mataPelajaran: guru.mata_pelajaran,
+            peran: guru.peran,
+            isKonselor: guru.peran === 'konselor',
+            isWaliKelas: guru.peran === 'wali_kelas',
+            kelasWali: kelasWali
+              ? {
+                  id: kelasWali.id,
+                  nama: kelasWali.nama,
+                  tingkat: tingkatRoman,
+                  jenjang: kelasWali.jenjang,
+                  label: `${tingkatRoman} ${kelasWali.nama}`,
+                }
+              : null,
+          },
+        };
       },
-    };
+      {
+        staleTtlMs: GuruDashboardService.PROFILE_STALE_TTL_MS,
+        onError: (error) => {
+          console.warn('[GuruDashboardService] Falling back to stale profile cache:', error);
+        },
+      },
+    );
   }
 
   // =====================================================

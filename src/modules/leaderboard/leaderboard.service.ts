@@ -550,6 +550,56 @@ export class LeaderboardService {
     return this.buildSiswaLeaderboard(siswaRows, kelasMap, nisLogin);
   }
 
+  async getTopSekolah(limit = 10): Promise<LeaderboardSiswaRow[]> {
+    const safeLimit =
+      Number.isFinite(limit) && limit > 0 ? Math.min(limit, 50) : 10;
+    const client = this.supabaseService.getClient();
+
+    const { data, error } = await client
+      .from('siswa')
+      .select('nis, nama, kelas_id, coins, streak, foto_url')
+      .eq('is_active', true)
+      .order('coins', { ascending: false })
+      .order('nama', { ascending: true })
+      .limit(safeLimit);
+
+    if (error) {
+      throw new BadRequestException(
+        `Gagal mengambil leaderboard siswa: ${error.message}`,
+      );
+    }
+
+    const kelasMap = await this.getKelasMap();
+    const topRows = ((data ?? []) as SiswaRow[]).map((row) => ({
+      ...row,
+      streak: Number(row.streak ?? 0),
+      last_streak_date: null,
+      is_active: true,
+    }));
+
+    const showcaseMap = await this.getShowcaseNoteMap(
+      topRows.map((row) => row.nis),
+    );
+
+    return topRows.map((row, index) => {
+      const kelas =
+        row.kelas_id != null ? kelasMap.get(String(row.kelas_id)) : undefined;
+
+      return {
+        rank: index + 1,
+        nis: row.nis,
+        nama: String(row.nama ?? '-'),
+        kelas: this.formatKelasLabel(kelas),
+        jenjang: this.deriveJenjang(kelas) ?? '-',
+        coins: Number(row.coins ?? 0),
+        streak: Number(row.streak ?? 0),
+        is_me: false,
+        fotoUrl: row.foto_url ?? null,
+        showcaseNote: showcaseMap.get(row.nis) ?? null,
+      };
+    });
+  }
+
   async getAntarJenjang(): Promise<LeaderboardJenjangRow[]> {
     const [kelasMap, siswaRows] = await Promise.all([
       this.getKelasMap(),

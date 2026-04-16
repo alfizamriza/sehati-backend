@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { SupabaseService } from 'src/supabase/supabase.service';
+import { RequestCache } from 'src/common/utils/request-cache';
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -63,11 +64,18 @@ export interface KantinDashboardResponse {
 
 @Injectable()
 export class KantinDashboardService {
+  private static readonly DASHBOARD_CACHE_TTL_MS = 15_000;
+  private static readonly DASHBOARD_STALE_TTL_MS = 60_000;
+
   constructor(private supabaseService: SupabaseService) {}
 
   async getDashboard(kantinId: number): Promise<KantinDashboardResponse> {
-    const supabase = this.supabaseService.getClient();
-    const idNum    = Number(kantinId);
+    return RequestCache.getOrSet(
+      `dashboard:kantin:${Number(kantinId)}`,
+      KantinDashboardService.DASHBOARD_CACHE_TTL_MS,
+      async () => {
+        const supabase = this.supabaseService.getClient();
+        const idNum = Number(kantinId);
 
     // ── Tanggal helpers ───────────────────────────────────────────────────
     const now               = new Date();
@@ -298,14 +306,22 @@ export class KantinDashboardService {
       }));
     }
 
-    return {
-      statHarian,
-      statMingguan,
-      produkTerlaris,
-      transaksiTerbaru,
-      stokRendah,
-      kantinNama,
-      totalPiutang,
-    };
+        return {
+          statHarian,
+          statMingguan,
+          produkTerlaris,
+          transaksiTerbaru,
+          stokRendah,
+          kantinNama,
+          totalPiutang,
+        };
+      },
+      {
+        staleTtlMs: KantinDashboardService.DASHBOARD_STALE_TTL_MS,
+        onError: (error) => {
+          console.warn('[KantinDashboardService] Falling back to stale dashboard cache:', error);
+        },
+      },
+    );
   }
 }

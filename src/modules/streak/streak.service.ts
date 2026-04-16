@@ -237,6 +237,99 @@ export class StreakService {
     return count;
   }
 
+  async calculateEffectiveStreaksInBatch(
+    siswaRows: Array<{ nis: string; streak: number | null; last_streak_date: string | null }>,
+  ): Promise<Map<string, number>> {
+    const todayStr = this.getTodayWIB();
+    const today = this.parseDateOnly(todayStr);
+
+    const resultMap = new Map<string, number>();
+
+    const lastDates = siswaRows
+      .map((row) => row.last_streak_date)
+      .filter((value): value is string => Boolean(value));
+
+    if (!lastDates.length) {
+      siswaRows.forEach((row) => resultMap.set(row.nis, 0));
+      return resultMap;
+    }
+
+    const earliestLastDate = lastDates.reduce((min, current) =>
+      current < min ? current : min,
+    );
+
+    const supabase = this.supabaseService.getClient();
+
+    const { data: holidays } = await supabase
+      .from('tanggal_libur')
+      .select('tanggal')
+      .eq('is_active', true)
+      .gte('tanggal', earliestLastDate)
+      .lte('tanggal', todayStr);
+
+    const holidaySet = new Set((holidays ?? []).map((h) => h.tanggal));
+
+    const { data: izinList } = await supabase
+      .from('siswa_izin')
+      .select('nis, tanggal')
+      .in('nis', siswaRows.map(s => s.nis))
+      .eq('status', 'approved')
+      .gte('tanggal', earliestLastDate)
+      .lte('tanggal', todayStr);
+
+    const izinMap = new Map<string, Set<string>>();
+    if (izinList) {
+      izinList.forEach(row => {
+        if (!izinMap.has(row.nis)) izinMap.set(row.nis, new Set());
+        izinMap.get(row.nis)!.add(row.tanggal);
+      });
+    }
+
+    const fmtDate = (d: Date) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    for (const row of siswaRows) {
+      const streak = row.streak || 0;
+      if (!row.last_streak_date || !streak) {
+        resultMap.set(row.nis, 0);
+        continue;
+      }
+
+      const lastStreakDate = this.parseDateOnly(row.last_streak_date);
+      const studentIzin = izinMap.get(row.nis) || new Set<string>();
+
+      let workdays = 0;
+      const current = new Date(lastStreakDate);
+
+      let isBroken = false;
+      while (current < today) {
+        current.setDate(current.getDate() + 1);
+        const day = current.getDay();
+        const dateStr = fmtDate(current);
+        const isWeekend = day === 0 || day === 6;
+        const isHoliday = holidaySet.has(dateStr);
+        const isExcused = studentIzin.has(dateStr);
+
+        if (!isWeekend && !isHoliday && !isExcused) {
+          workdays++;
+        }
+
+        if (workdays > 1) {
+          isBroken = true;
+          break;
+        }
+      }
+
+      resultMap.set(row.nis, isBroken ? 0 : streak);
+    }
+
+    return resultMap;
+  }
+
   /**
    * Get top streaks (untuk leaderboard)
    */

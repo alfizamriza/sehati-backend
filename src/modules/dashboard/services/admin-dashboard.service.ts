@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { SupabaseService } from 'src/supabase/supabase.service';
 import { LeaderboardService } from 'src/modules/leaderboard/leaderboard.service';
+import { RequestCache } from 'src/common/utils/request-cache';
 
 type MaybeRelation<T extends Record<string, unknown>> = T | T[] | null | undefined;
 
@@ -17,30 +18,108 @@ function getRelationName<T extends { nama?: string }>(
 
 @Injectable()
 export class AdminDashboardService {
+  private static readonly CACHE_TTL_MS = 15_000;
+  private static readonly STALE_TTL_MS = 60_000;
+
   constructor(
     private supabaseService: SupabaseService,
     private leaderboardService: LeaderboardService,
   ) {}
 
   async getDashboardData() {
-    // Execute all queries in parallel for better performance
-    const [stats, complianceChart, leaderboard, recentActivities] =
-      await Promise.all([
-        this.getStats(),
-        this.getComplianceChart(),
-        this.getLeaderboard(),
-        this.getRecentActivities(),
-      ]);
+    return RequestCache.getOrSet(
+      'dashboard:admin',
+      AdminDashboardService.CACHE_TTL_MS,
+      async () => {
+        const warnings: string[] = [];
 
-    return {
-      success: true,
-      data: {
-        stats,
-        complianceChart,
-        leaderboard,
-        recentActivities,
+        const [stats, complianceChart, leaderboard, recentActivities] =
+          await Promise.all([
+            this.getSection(
+              'stats',
+              () => this.getStats(),
+              {
+                totalSiswa: 0,
+                totalSiswaAktif: 0,
+                totalGuru: 0,
+                totalGuruAktif: 0,
+                totalCoins: 0,
+                totalKelas: 0,
+                totalVoucher: 0,
+                voucherDiklaim: 0,
+              },
+              warnings,
+            ),
+            this.getSection(
+              'compliance-chart',
+              () => this.getComplianceChart(),
+              { labels: [], data: [], dateKeys: [] },
+              warnings,
+            ),
+            this.getSection(
+              'leaderboard',
+              () => this.getLeaderboard(),
+              [],
+              warnings,
+            ),
+            this.getSection(
+              'recent-activities',
+              () => this.getRecentActivities(),
+              [],
+              warnings,
+            ),
+          ]);
+
+        return {
+          success: true,
+          data: {
+            stats,
+            complianceChart,
+            leaderboard,
+            recentActivities,
+          },
+          meta: warnings.length
+            ? {
+                degraded: true,
+                warnings,
+              }
+            : undefined,
+        };
       },
-    };
+      {
+        staleTtlMs: AdminDashboardService.STALE_TTL_MS,
+        onError: (error) => {
+          console.warn('[AdminDashboardService] Falling back to stale cache:', error);
+        },
+      },
+    );
+  }
+
+  private async getSection<T>(
+    section: string,
+    loader: () => Promise<T>,
+    fallback: T,
+    warnings: string[],
+  ): Promise<T> {
+    try {
+      return await RequestCache.getOrSet(
+        `dashboard:admin:${section}`,
+        AdminDashboardService.CACHE_TTL_MS,
+        loader,
+        {
+          staleTtlMs: AdminDashboardService.STALE_TTL_MS,
+          onError: (error) => {
+            console.warn(
+              `[AdminDashboardService] Section '${section}' failed:`,
+              error,
+            );
+          },
+        },
+      );
+    } catch {
+      warnings.push(`Section '${section}' menggunakan fallback sementara.`);
+      return fallback;
+    }
   }
 
   // ==========================================
@@ -48,6 +127,24 @@ export class AdminDashboardService {
   // ==========================================
   private async getStats() {
     const supabase = this.supabaseService.getClient();
+
+    const { data: statsRow, error: statsRpcError } = await supabase.rpc(
+      'get_admin_dashboard_stats',
+    );
+
+    if (!statsRpcError && Array.isArray(statsRow) && statsRow[0]) {
+      const row = statsRow[0] as Record<string, number | null>;
+      return {
+        totalSiswa: Number(row.total_siswa ?? 0),
+        totalSiswaAktif: Number(row.total_siswa_aktif ?? 0),
+        totalGuru: Number(row.total_guru ?? 0),
+        totalGuruAktif: Number(row.total_guru_aktif ?? 0),
+        totalCoins: Number(row.total_coins ?? 0),
+        totalKelas: Number(row.total_kelas ?? 0),
+        totalVoucher: Number(row.total_voucher ?? 0),
+        voucherDiklaim: Number(row.voucher_diklaim ?? 0),
+      };
+    }
 
     // Use RPC or efficient count queries where possible
     const [
@@ -144,14 +241,45 @@ export class AdminDashboardService {
       }
     }
 
-    const absenCounts = await Promise.all(
-      dateKeys.map(async (dateStr) => {
-        const { count } = await supabase
-          .from('absensi_tumbler')
-          .select('*', { count: 'exact', head: true })
-          .eq('tanggal', dateStr);
-        return count ?? 0;
-      }),
+    let attendanceRows:
+      | Array<{ tanggal: string | Date; total?: number | null }>
+      | null
+      | undefined;
+
+    const { data: attendanceRpcRows, error: attendanceRpcError } =
+      await supabase.rpc('get_dashboard_absensi_counts', {
+        p_start_date: dateKeys[0],
+        p_end_date: dateKeys[dateKeys.length - 1],
+      });
+
+    if (!attendanceRpcError && Array.isArray(attendanceRpcRows)) {
+      attendanceRows = attendanceRpcRows as Array<{
+        tanggal: string | Date;
+        total?: number | null;
+      }>;
+    } else {
+      const { data } = await supabase
+        .from('absensi_tumbler')
+        .select('tanggal')
+        .gte('tanggal', dateKeys[0])
+        .lte('tanggal', dateKeys[dateKeys.length - 1]);
+
+      attendanceRows = data as Array<{ tanggal: string | Date }> | null;
+    }
+
+    const attendanceByDate = new Map<string, number>();
+    (attendanceRows ?? []).forEach((row) => {
+      const dateKey = String(row.tanggal).split('T')[0];
+      const increment =
+        typeof row.total === 'number' ? Number(row.total) : 1;
+      attendanceByDate.set(
+        dateKey,
+        (attendanceByDate.get(dateKey) ?? 0) + increment,
+      );
+    });
+
+    const absenCounts = dateKeys.map(
+      (dateStr) => attendanceByDate.get(dateStr) ?? 0,
     );
 
     const data = absenCounts.map((absenCount) =>
@@ -171,9 +299,9 @@ export class AdminDashboardService {
   // 3. TOP 10 LEADERBOARD
   // ==========================================
   private async getLeaderboard() {
-    const siswaList = await this.leaderboardService.getSekolah();
+    const siswaList = await this.leaderboardService.getTopSekolah(10);
 
-    return siswaList.slice(0, 10).map((siswa) => ({
+    return siswaList.map((siswa) => ({
       rank: siswa.rank,
       nis: siswa.nis,
       nama: siswa.nama,
