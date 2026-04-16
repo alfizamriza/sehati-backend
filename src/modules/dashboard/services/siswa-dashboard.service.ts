@@ -285,34 +285,7 @@ export class SiswaDashboardService {
   private formatDateLocal(d: Date) {
     const y = d.getFullYear();
 
-  // =====================================================
-  // DATE HELPERS
-  // =====================================================
 
-  /**
-   * FIX 3: Selalu ambil SELURUH bulan, bukan sampai hari ini.
-   * Frontend yang bertanggung jawab menyembunyikan / greying out
-   * tanggal masa depan — backend cukup kirim semua data termasuk
-   * tanggal libur yang belum terjadi.
-   */
-  private getMonthDays(year?: number, month?: number): SchoolDay[] {
-    const now = new Date();
-    const y = year ?? now.getFullYear();
-    const m = month ?? (now.getMonth() + 1); // 1-based
-
-    // Selalu ambil seluruh hari dalam bulan (bukan sampai hari ini)
-    const totalDays = new Date(y, m, 0).getDate();
-
-    const days: SchoolDay[] = [];
-    for (let d = 1; d <= totalDays; d++) {
-      const dt = new Date(y, m - 1, d);
-      days.push({ date: this.formatDateLocal(dt), label: String(d) });
-    }
-    return days;
-  }
-
-  private formatDateLocal(d: Date) {
-    const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
