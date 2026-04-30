@@ -67,14 +67,26 @@ async function bootstrap() {
   // Swagger (useful in development; can be disabled in production via env)
   if (!isProduction || configService.get<boolean>('app.swaggerEnabled')) {
     const config = new DocumentBuilder()
-      .setTitle('Sehati API')
-      .setDescription('API untuk Sistem Manajemen Sekolah Hijau')
+      .setTitle('SEHATI API')
+      .setDescription(
+        [
+          'API backend untuk Sistem Manajemen Sekolah Hijau dan Anti Plastik (SEHATI).',
+          '',
+          'Dokumentasi ini dirancang untuk memudahkan frontend developer, penguji API, dan integrator memahami endpoint yang tersedia beserta mekanisme autentikasinya.',
+          '',
+          'Modul utama yang tersedia mencakup autentikasi, master data, absensi, transaksi kantin, voucher, pelanggaran, leaderboard, dashboard, profil, riwayat, analytics, dan izin.',
+          '',
+          'Authentication:',
+          'Sebagian endpoint menggunakan JWT Bearer Token. Gunakan tombol Authorize dan masukkan access token untuk mengakses endpoint yang dilindungi.',
+        ].join('\n'),
+      )
       .setVersion('1.0.0')
       .addBearerAuth(
         { type: 'http', scheme: 'Bearer', bearerFormat: 'JWT' },
         'access-token',
       )
       .addServer(`http://localhost:${port}`, 'Local Development')
+      .addServer('https://shtbackend.up.railway.app', 'Production')
       .build();
 
     const swaggerOptions: SwaggerCustomOptions = {

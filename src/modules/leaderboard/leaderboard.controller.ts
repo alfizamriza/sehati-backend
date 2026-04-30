@@ -8,6 +8,7 @@ import {
   BadRequestException,
   StreamableFile,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { LeaderboardService } from './leaderboard.service';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { Request, Response } from 'express';
@@ -19,6 +20,8 @@ interface AuthRequest extends Request {
   };
 }
 
+@ApiTags('Leaderboard')
+@ApiBearerAuth('access-token')
 @Controller('api/leaderboard')
 @UseGuards(JwtAuthGuard)
 export class LeaderboardController {
@@ -30,6 +33,7 @@ export class LeaderboardController {
   //   Guru / Admin → ?kelas_id=xx wajib; null = semua siswa
   // ─────────────────────────────────────────────
   @Get('kelas-saya')
+  @ApiOperation({ summary: 'Get class leaderboard for current user or selected class' })
   getKelasSaya(@Req() req: AuthRequest, @Query('kelas_id') kelasId?: string) {
     if (req.user.role === 'siswa') {
       return this.leaderboardService.getKelasSaya(req.user.sub);
@@ -46,6 +50,7 @@ export class LeaderboardController {
   //   ?jenjang     → opsional filter SD / SMP / SMA
   // ─────────────────────────────────────────────
   @Get('antar-kelas')
+  @ApiOperation({ summary: 'Get inter-class leaderboard' })
   getAntarKelas(@Req() req: AuthRequest, @Query('jenjang') jenjang?: string) {
     const nisLogin = req.user.role === 'siswa' ? req.user.sub : undefined;
     return this.leaderboardService.getAntarKelas(nisLogin, jenjang);
@@ -57,6 +62,7 @@ export class LeaderboardController {
   //   Siswa        → is_me otomatis ditandai
   // ─────────────────────────────────────────────
   @Get('sekolah')
+  @ApiOperation({ summary: 'Get school-wide leaderboard' })
   getSekolah(@Req() req: AuthRequest) {
     const nisLogin = req.user.role === 'siswa' ? req.user.sub : undefined;
     return this.leaderboardService.getSekolah(nisLogin);
@@ -67,6 +73,7 @@ export class LeaderboardController {
   //   Semua role   → ranking SD / SMP / SMA by avg coins
   // ─────────────────────────────────────────────
   @Get('antar-jenjang')
+  @ApiOperation({ summary: 'Get cross-level leaderboard' })
   getAntarJenjang() {
     return this.leaderboardService.getAntarJenjang();
   }
@@ -77,6 +84,7 @@ export class LeaderboardController {
   //   Guru / Admin → ?jenjang wajib diisi (SD | SMP | SMA)
   // ─────────────────────────────────────────────
   @Get('siswa-antar-jenjang')
+  @ApiOperation({ summary: 'Get student leaderboard across education levels' })
   getSiswaAntarJenjang(
     @Req() req: AuthRequest,
     @Query('jenjang') jenjang?: string,
@@ -98,6 +106,7 @@ export class LeaderboardController {
   //   Returns PDF file of specified leaderboard for guru/admin
   // ─────────────────────────────────────────────
   @Get('export')
+  @ApiOperation({ summary: 'Export leaderboard data as PDF' })
   async exportPdf(
     @Req() req: AuthRequest,
     @Res({ passthrough: true }) res: any,

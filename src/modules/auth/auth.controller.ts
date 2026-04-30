@@ -54,8 +54,11 @@ export class AuthController {
   @ApiOperation({ summary: 'Logout user' })
   @ApiResponse({ status: 200, description: 'Logout successful' })
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const token = req.headers.authorization?.startsWith('Bearer ')
+      ? req.headers.authorization.slice(7).trim()
+      : req.cookies?.auth_token ?? null;
     this.clearAuthCookies(req, res);
-    return this.authService.logout();
+    return this.authService.logout(token);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

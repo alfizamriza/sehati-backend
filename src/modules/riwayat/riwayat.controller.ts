@@ -1,8 +1,11 @@
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { Controller, Get, Query, UseGuards, Request } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RiwayatService } from './riwayat.service';
 
 
+@ApiTags('Riwayat')
+@ApiBearerAuth('access-token')
 @Controller('api/riwayat')
 @UseGuards(JwtAuthGuard)
 export class RiwayatController {
@@ -10,6 +13,7 @@ export class RiwayatController {
 
   /** GET /riwayat/semua */
   @Get('semua')
+  @ApiOperation({ summary: 'Get all student activity history' })
   async getRiwayatAll(@Request() req: any, @Query('limit') limit?: string) {
     // Log untuk debug — hapus setelah konfirmasi data muncul
     console.log('[RiwayatController] req.user =', req.user);
@@ -27,6 +31,7 @@ export class RiwayatController {
   }
 
   @Get('tumbler')
+  @ApiOperation({ summary: 'Get tumbler activity history' })
   async getTumbler(@Request() req: any, @Query('limit') limit?: string) {
     const nis = this.extractNis(req.user);
     if (!nis) return { success: false, message: 'NIS tidak ditemukan di token' };
@@ -35,6 +40,7 @@ export class RiwayatController {
   }
 
   @Get('belanja')
+  @ApiOperation({ summary: 'Get shopping history' })
   async getBelanja(@Request() req: any, @Query('limit') limit?: string) {
     const nis = this.extractNis(req.user);
     if (!nis) return { success: false, message: 'NIS tidak ditemukan di token' };
@@ -43,6 +49,7 @@ export class RiwayatController {
   }
 
   @Get('pelanggaran')
+  @ApiOperation({ summary: 'Get violation history' })
   async getPelanggaran(@Request() req: any, @Query('limit') limit?: string) {
     const nis = this.extractNis(req.user);
     if (!nis) return { success: false, message: 'NIS tidak ditemukan di token' };
@@ -51,6 +58,7 @@ export class RiwayatController {
   }
 
   @Get('summary')
+  @ApiOperation({ summary: 'Get student activity summary' })
   async getSummary(@Request() req: any) {
     const nis = this.extractNis(req.user);
     if (!nis) return { success: false, message: 'NIS tidak ditemukan di token' };

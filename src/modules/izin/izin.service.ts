@@ -123,12 +123,13 @@ export class IzinService {
   /** Batch create — insert beberapa siswa sekaligus, semua langsung approved */
   async createBatch(dto: CreateBatchIzinDto) {
     const supabase = this.supabaseService.getClient();
+    const nisList = dto.nisList;
 
-    if (!dto.nis_list || dto.nis_list.length === 0) {
-      throw new BadRequestException('nis_list tidak boleh kosong');
+    if (!nisList || nisList.length === 0) {
+      throw new BadRequestException('nisList tidak boleh kosong');
     }
 
-    const rows = dto.nis_list.map((nis) => ({
+    const rows = nisList.map((nis) => ({
       nis,
       tanggal: dto.tanggal,
       tipe: dto.tipe,

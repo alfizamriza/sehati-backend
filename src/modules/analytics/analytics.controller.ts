@@ -1,7 +1,10 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import * as analyticsService_1 from './analytics.service';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
+@ApiTags('Analytics')
+@ApiBearerAuth('access-token')
 @Controller('api/analytics')
 @UseGuards(JwtAuthGuard)
 export class AnalyticsController {
@@ -14,6 +17,7 @@ export class AnalyticsController {
    * &endDate=YYYY-MM-DD
    */
   @Get()
+  @ApiOperation({ summary: 'Get analytics data by period' })
   async getAnalytics(
     @Query('period')    period: analyticsService_1.AnalyticsPeriod = 'today',
     @Query('startDate') startDate?: string,

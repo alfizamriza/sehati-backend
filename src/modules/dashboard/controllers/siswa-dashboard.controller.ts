@@ -5,12 +5,15 @@ import {
   Req,
     Query,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SiswaDashboardService } from '../services/siswa-dashboard.service';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { UserRole } from 'src/common/enums/user-role.enum';
 
+@ApiTags('Siswa Dashboard')
+@ApiBearerAuth('access-token')
 @Controller('api/dashboard/siswa')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.SISWA)
@@ -22,6 +25,7 @@ export class SiswaDashboardController {
    * Dashboard overview untuk siswa
    */
   @Get()
+  @ApiOperation({ summary: 'Get student dashboard overview' })
   async getDashboard(
     @Req() req: any,
     @Query('mode') mode: 'month' = 'month',

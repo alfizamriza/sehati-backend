@@ -13,6 +13,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { SiswaService } from './siswa.service';
 import { CreateSiswaDto } from './dto/create-siswa.dto';
@@ -31,6 +32,8 @@ type UploadedExcelFile = {
   originalname?: string;
 };
 
+@ApiTags('Siswa')
+@ApiBearerAuth('access-token')
 @Controller('api/siswa')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
@@ -39,6 +42,7 @@ export class SiswaController {
 
  // ⚠️ PENTING: TEMPLATE HARUS DI ATAS SEMUA ROUTE!
   @Get('import-template')
+  @ApiOperation({ summary: 'Download student import template file' })
   async getTemplate(@Res() res: Response) {
     const template = await this.siswaService.generateImportTemplate();
     
@@ -52,6 +56,7 @@ export class SiswaController {
 
   // ⚠️ HARUS DI ATAS @Get(':nis')
   @Post('import')
+  @ApiOperation({ summary: 'Import students from Excel or CSV file' })
   @UseInterceptors(
     FileInterceptor('file', {
       limits: {
@@ -84,24 +89,28 @@ export class SiswaController {
 
   // GET /api/siswa - Get all siswa
   @Get()
+  @ApiOperation({ summary: 'Get all students' })
   async findAll() {
     return this.siswaService.findAll();
   }
 
   // GET /api/siswa/:nis - Get siswa by NIS
   @Get(':nis')
+  @ApiOperation({ summary: 'Get student detail by NIS' })
   async findOne(@Param('nis') nis: string) {
     return this.siswaService.findOne(nis);
   }
 
   // POST /api/siswa - Create siswa
   @Post()
+  @ApiOperation({ summary: 'Create new student data' })
   async create(@Body() createSiswaDto: CreateSiswaDto) {
     return this.siswaService.create(createSiswaDto);
   }
 
   // PUT /api/siswa/:nis - Update siswa
   @Put(':nis')
+  @ApiOperation({ summary: 'Update student data by NIS' })
   async update(
     @Param('nis') nis: string,
     @Body() updateSiswaDto: UpdateSiswaDto,
@@ -111,6 +120,7 @@ export class SiswaController {
 
   // DELETE /api/siswa/:nis - Delete siswa
   @Delete(':nis')
+  @ApiOperation({ summary: 'Delete student data by NIS' })
   async remove(@Param('nis') nis: string) {
     return this.siswaService.remove(nis);
   }

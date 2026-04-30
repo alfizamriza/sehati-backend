@@ -1,8 +1,10 @@
 import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { Public } from '../common/decorators/public.decorator';
 
+@ApiTags('Health')
 @Controller('api/health')
 export class HealthController {
   constructor(
@@ -12,6 +14,7 @@ export class HealthController {
 
   @Public()
   @Get('check')
+  @ApiOperation({ summary: 'Check backend health and infrastructure status' })
   async healthCheck() {
     const checks: any = {
       timestamp: new Date().toISOString(),
@@ -57,6 +60,7 @@ export class HealthController {
 
   @Public()
   @Get('schema/users')
+  @ApiOperation({ summary: 'Inspect users table schema from Supabase' })
   async getUsersSchema() {
     try {
       await this.supabaseService.queryCollection('users', 'username', 'non-existent-user-xyz');

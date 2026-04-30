@@ -5,6 +5,7 @@ import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { TokenRevocationService } from './token-revocation.service';
 import { DatabaseModule } from '../../database/database.module';
 import { AchievementModule } from '../achievement/achievement.module';
 
@@ -30,7 +31,7 @@ import { AchievementModule } from '../achievement/achievement.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, TokenRevocationService],
   exports: [AuthService],
 })
 export class AuthModule {}

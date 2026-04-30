@@ -8,6 +8,7 @@ import {
   Req,
   ParseIntPipe,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AbsensiService } from './absensi.service';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
@@ -17,6 +18,8 @@ import { UserRole } from 'src/common/enums/user-role.enum';
 import { Permissions } from 'src/common/decorators/permissions.decorator';
 import { PermissionsGuard } from 'src/common/guards/permissions.guard';
 
+@ApiTags('Absensi')
+@ApiBearerAuth('access-token')
 @Controller('api/absensi')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 export class AbsensiController {
@@ -30,6 +33,7 @@ export class AbsensiController {
   @Post('scan')
   @Roles(UserRole.GURU, UserRole.SISWA)
   @Permissions('manage_absensi')
+  @ApiOperation({ summary: 'Record attendance from QR scan' })
   async scan(@Req() req: any, @Body() body: { nis: string }) {
     return this.absensiService.scanAbsensi(body.nis, {
       guruNip: req.user?.role === UserRole.GURU ? req.user.sub : null,
@@ -43,6 +47,7 @@ export class AbsensiController {
   @Post('manual')
   @Roles(UserRole.GURU, UserRole.SISWA)
   @Permissions('manage_absensi')
+  @ApiOperation({ summary: 'Record manual attendance for one student' })
   async manualSatu(@Req() req: any, @Body() body: { nis: string }) {
     return this.absensiService.manualAbsensi(body.nis, {
       guruNip: req.user?.role === UserRole.GURU ? req.user.sub : null,
@@ -58,6 +63,7 @@ export class AbsensiController {
   @Post('manual/bulk')
   @Roles(UserRole.GURU, UserRole.SISWA)
   @Permissions('manage_absensi')
+  @ApiOperation({ summary: 'Record manual attendance for multiple students' })
   async manualBulk(@Req() req: any, @Body() body: { nisList: string[] }) {
     return this.absensiService.bulkManualAbsensi(body.nisList, {
       guruNip: req.user?.role === UserRole.GURU ? req.user.sub : null,
@@ -72,6 +78,7 @@ export class AbsensiController {
   @Get('kelas')
   @Roles(UserRole.GURU, UserRole.ADMIN, UserRole.SISWA)
   @Permissions('manage_absensi')
+  @ApiOperation({ summary: 'Get class list for attendance module' })
   async getKelas() {
     return this.absensiService.getKelasList();
   }
@@ -84,6 +91,7 @@ export class AbsensiController {
   @Get('kelas/:kelasId/siswa')
   @Roles(UserRole.GURU, UserRole.ADMIN, UserRole.SISWA)
   @Permissions('manage_absensi')
+  @ApiOperation({ summary: 'Get students by class for attendance' })
   async getSiswaByKelas(@Param('kelasId', ParseIntPipe) kelasId: number) {
     return this.absensiService.getSiswaByKelas(kelasId);
   }
@@ -95,6 +103,7 @@ export class AbsensiController {
   @Get('status/:nis')
   @Roles(UserRole.GURU, UserRole.ADMIN, UserRole.SISWA)
   @Permissions('manage_absensi')
+  @ApiOperation({ summary: 'Get today attendance status by student NIS' })
   async getStatus(@Param('nis') nis: string) {
     return this.absensiService.getStatusHariIni(nis);
   }
@@ -105,6 +114,7 @@ export class AbsensiController {
   // =====================================================
   @Get('riwayat/:nis')
   @Roles(UserRole.GURU, UserRole.SISWA, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get attendance history by student NIS' })
   async getRiwayat(@Param('nis') nis: string) {
     return this.absensiService.getRiwayat(nis);
   }
@@ -115,6 +125,7 @@ export class AbsensiController {
   // Tidak perlu auth — boleh diakses siapa saja
   // =====================================================
   @Get('info-hari-ini')
+  @ApiOperation({ summary: 'Get attendance information for today' })
   async getInfoHariIni() {
     return this.absensiService.getInfoHariIni();
   }

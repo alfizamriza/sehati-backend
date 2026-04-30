@@ -2,6 +2,7 @@ import {
   Controller, Get, Post, Patch, Delete, Body, Param, ParseIntPipe,
   UseGuards, Request, Query,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PelanggaranService } from './pelanggaran.service';
 import { CreatePelanggaranDto } from './dto/create-pelanggaran.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
@@ -11,6 +12,8 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 import { Permissions } from 'src/common/decorators/permissions.decorator';
 import { UserRole } from 'src/common/enums/user-role.enum';
 
+@ApiTags('Pelanggaran')
+@ApiBearerAuth('access-token')
 @Controller('api/pelanggaran')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles(UserRole.GURU, UserRole.ADMIN, UserRole.SISWA)
@@ -20,18 +23,21 @@ export class PelanggaranController {
 
   // GET /pelanggaran/kelas
   @Get('kelas')
+  @ApiOperation({ summary: 'Get class list for violation reporting' })
   getKelasList() {
     return this.pelanggaranService.getKelasList();
   }
 
   // GET /pelanggaran/kelas/:kelasId/siswa
   @Get('kelas/:kelasId/siswa')
+  @ApiOperation({ summary: 'Get students by class for violation reporting' })
   getSiswaByKelas(@Param('kelasId', ParseIntPipe) kelasId: number) {
     return this.pelanggaranService.getSiswaByKelas(kelasId);
   }
 
   // GET /pelanggaran/jenis
   @Get('jenis')
+  @ApiOperation({ summary: 'Get active violation types' })
   getJenisPelanggaranAktif() {
     return this.pelanggaranService.getJenisPelanggaranAktif();
   }
@@ -39,6 +45,7 @@ export class PelanggaranController {
   // GET /pelanggaran/riwayat/saya
   // PENTING: harus SEBELUM :id agar tidak bentrok dengan route :id
   @Get('riwayat/saya')
+  @ApiOperation({ summary: 'Get violation history submitted by current user' })
   getRiwayatSaya(
     @Request() req: any,
     @Query('limit') limit?: string,
@@ -52,6 +59,7 @@ export class PelanggaranController {
 
   // POST /pelanggaran
   @Post()
+  @ApiOperation({ summary: 'Create new violation report' })
   createPelanggaran(@Body() dto: CreatePelanggaranDto, @Request() req: any) {
     return this.pelanggaranService.createPelanggaran(dto, {
       role: req.user?.role,
@@ -62,6 +70,7 @@ export class PelanggaranController {
 
   // PATCH /pelanggaran/:id/bukti
   @Patch(':id/bukti')
+  @ApiOperation({ summary: 'Update violation evidence photo' })
   updateBuktiFoto(
     @Param('id', ParseIntPipe) id: number,
     @Body('bukti_foto_url') buktiUrl: string,
@@ -77,6 +86,7 @@ export class PelanggaranController {
   // PATCH /pelanggaran/:id
   // Edit jenis pelanggaran & catatan — hanya jika status pending & milik guru sendiri
   @Patch(':id')
+  @ApiOperation({ summary: 'Update violation report data' })
   updatePelanggaran(
     @Param('id', ParseIntPipe) id: number,
     @Body() body: { jenis_pelanggaran_id?: number; catatan?: string },
@@ -92,6 +102,7 @@ export class PelanggaranController {
   // DELETE /pelanggaran/:id
   // Hapus laporan — hanya jika status pending & milik guru sendiri
   @Delete(':id')
+  @ApiOperation({ summary: 'Delete violation report by ID' })
   deletePelanggaran(
     @Param('id', ParseIntPipe) id: number,
     @Request() req: any,

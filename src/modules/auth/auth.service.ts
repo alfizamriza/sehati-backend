@@ -6,6 +6,7 @@ import { RegisterAdminDto } from './dto/register-admin.dto';
 import { SupabaseService } from '../../supabase/supabase.service';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { AchievementService } from '../achievement/achievement.service';
+import { TokenRevocationService } from './token-revocation.service';
 
 interface LoginAuditMeta {
   ipAddress?: string | null;
@@ -18,6 +19,7 @@ export class AuthService {
     private jwtService: JwtService,
     private supabaseService: SupabaseService,
     private achievementService: AchievementService,
+    private tokenRevocationService: TokenRevocationService,
   ) { }
 
   async login(loginDto: LoginDto, meta: LoginAuditMeta = {}) {
@@ -337,7 +339,13 @@ export class AuthService {
     }
   }
 
-  async logout() {
+  async logout(token?: string | null) {
+    if (token) {
+      const decoded = this.jwtService.decode(token) as { exp?: number } | null;
+      const expiresAtMs = decoded?.exp ? decoded.exp * 1000 : undefined;
+      this.tokenRevocationService.revokeToken(token, expiresAtMs);
+    }
+
     return {
       success: true,
       message: 'Logout berhasil',

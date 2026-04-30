@@ -1,11 +1,14 @@
 import { Controller, Get } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SupabaseService } from './supabase/supabase.service';
 
+@ApiTags('Utility')
 @Controller()
 export class AppController {
   constructor(private supabaseService: SupabaseService) {}
 
   @Get('test')
+  @ApiOperation({ summary: 'Test Supabase connection' })
   async testConnection() {
     const supabase = this.supabaseService.getClient();
       

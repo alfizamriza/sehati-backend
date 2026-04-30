@@ -1,29 +1,46 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
 import { UserRole } from '../../../common/enums/user-role.enum';
+import { TokenRevocationService } from '../token-revocation.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(configService: ConfigService) {
+  constructor(
+    configService: ConfigService,
+    private tokenRevocationService: TokenRevocationService,
+  ) {
     const secret = configService.get('JWT_SECRET') || 'your-super-secret-key';
-    
+
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
         ExtractJwt.fromAuthHeaderAsBearerToken(),
-        (req: Request) => req?.cookies?.auth_token ?? this.getCookieFromHeader(req, 'auth_token'),
+        (req: Request) =>
+          req?.cookies?.auth_token ?? this.getCookieFromHeader(req, 'auth_token'),
       ]),
+      passReqToCallback: true,
       ignoreExpiration: false,
       secretOrKey: secret,
     });
-    
-    console.log('🔒 JWT Strategy initialized with secret length:', secret.length);
+
+    console.log('JWT Strategy initialized with secret length:', secret.length);
   }
 
-  async validate(payload: any) {
-    console.log('✅ JWT Token validated:', { userId: payload.sub, role: payload.role });
+  async validate(req: Request, payload: any) {
+    const token = this.tokenRevocationService.extractTokenFromRequest(req);
+    if (token && this.tokenRevocationService.isTokenRevoked(token)) {
+      throw new UnauthorizedException(
+        'Token sudah logout dan tidak dapat digunakan lagi',
+      );
+    }
+
+    console.log('JWT Token validated:', {
+      userId: payload.sub,
+      role: payload.role,
+    });
+
     return {
       sub: payload.sub,
       role: payload.role as UserRole,
@@ -32,7 +49,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     };
   }
 
-  private getCookieFromHeader(req: Request | undefined, name: string): string | null {
+  private getCookieFromHeader(
+    req: Request | undefined,
+    name: string,
+  ): string | null {
     const rawCookie = req?.headers?.cookie;
     if (!rawCookie) return null;
 

@@ -1,7 +1,10 @@
 import { Controller, Get, UseGuards, Request } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { KantinDashboardService } from '../services/kantin-dashboard.service';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
+@ApiTags('Kantin Dashboard')
+@ApiBearerAuth('access-token')
 @Controller('api/kantin/dashboard')
 @UseGuards(JwtAuthGuard)
 export class KantinDashboardController {
@@ -9,6 +12,7 @@ export class KantinDashboardController {
 
   /** GET /dashboard/kantin */
   @Get()
+  @ApiOperation({ summary: 'Get canteen dashboard summary' })
   async getDashboard(@Request() req: any) {
     // JWT kantin menyimpan id di salah satu field berikut
     const kantinId = this.extractKantinId(req.user);
