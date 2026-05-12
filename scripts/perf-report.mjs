@@ -15,7 +15,8 @@ const SCENARIOS = [
   { name: "Beban Rendah", concurrency: 1, requests: 30 },
   { name: "Beban Sedang", concurrency: 5, requests: 50 },
   { name: "Beban Tinggi", concurrency: 10, requests: 100 },
-  { name: "Beban Sangat Tinggi", concurrency: 20, requests: 200 },
+  { name: "Beban Sangat Tinggi", concurrency: 50, requests: 1000 },
+  { name: "Beban Ekstrem", concurrency: 100, requests: 2000 },
 ];
 const ROLES = ["siswa", "guru", "admin", "kantin"];
 const REPORTS_DIR = join(process.cwd(), "reports", "perf");

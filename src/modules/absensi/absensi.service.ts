@@ -9,7 +9,7 @@ export class AbsensiService {
     private supabaseService: SupabaseService,
     private achievementService: AchievementService,
     private streakService: StreakService,
-  ) {}
+  ) { }
 
   private normalizePetugas(actor: {
     guruNip?: string | null;
@@ -22,18 +22,13 @@ export class AbsensiService {
   }
 
   // =====================================================
-  // HELPER: GET TODAY'S DATE (timezone-safe, server local)
-  // Menggunakan locale date agar tidak terjadi date shift
-  // akibat perbedaan timezone server vs UTC
+  // HELPER: GET TODAY'S DATE (timezone-safe, WIB UTC+7)
   // =====================================================
   private getTodayString(): string {
-    // Paksa gunakan zona waktu Asia/Jakarta via Intl agar konsisten di semua host
-    const wibString = new Date().toLocaleString('en-US', { timeZone: 'Asia/Jakarta' });
-    const wibDate = new Date(wibString);
-    const year = wibDate.getFullYear();
-    const month = String(wibDate.getMonth() + 1).padStart(2, '0');
-    const day = String(wibDate.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    const now = new Date();
+    const offset = 7 * 60; // WIB = UTC+7
+    const wib = new Date(now.getTime() + offset * 60 * 1000);
+    return wib.toISOString().split('T')[0];
   }
 
   // =====================================================
@@ -51,8 +46,7 @@ export class AbsensiService {
 
   // =====================================================
   // CEK HARI LIBUR — return detail info
-  // FIX: .eq('is_active', 'true') — kolom bertipe TEXT,
-  //      bukan boolean, sehingga harus pakai string 'true'
+  // Kolom is_active bertipe TEXT, pakai string 'true'
   // =====================================================
   private async getInfoLibur(
     tanggal: string,
@@ -64,12 +58,11 @@ export class AbsensiService {
     if (dayOfWeek === 6) return { isLibur: true, keterangan: 'Hari Sabtu' };
     if (dayOfWeek === 0) return { isLibur: true, keterangan: 'Hari Minggu' };
 
-    // FIX: pakai string 'true' karena kolom is_active bertipe TEXT
     const { data } = await supabase
       .from('tanggal_libur')
       .select('keterangan')
       .eq('tanggal', tanggal)
-      .eq('is_active', 'true') // ← FIXED: was `true` (boolean), now `'true'` (string)
+      .eq('is_active', 'true')
       .maybeSingle();
 
     if (data) {
@@ -101,7 +94,6 @@ export class AbsensiService {
 
   // =====================================================
   // CARI HARI SEKOLAH SEBELUMNYA
-  // FIX: sama, pakai string 'true' untuk is_active
   // =====================================================
   private async getHariSekolahSebelumnya(dari: string, nis: string): Promise<string | null> {
     const supabase = this.supabaseService.getClient();
@@ -231,7 +223,6 @@ export class AbsensiService {
 
   // =====================================================
   // CORE PROSES ABSENSI
-  // FIX: pakai getTodayString() agar aman dari timezone shift
   // =====================================================
   private async prosesAbsensi(
     nis: string,
@@ -240,7 +231,7 @@ export class AbsensiService {
   ) {
     const supabase = this.supabaseService.getClient();
     const { guruNip, siswaNis } = this.normalizePetugas(actor);
-    const today = this.getTodayString(); // ← FIXED: was `new Date().toISOString().split('T')[0]`
+    const today = this.getTodayString();
 
     // 1. Cek hari libur
     const infoLibur = await this.getInfoLibur(today);
@@ -341,7 +332,15 @@ export class AbsensiService {
 
     return {
       success: true,
-      data: { nis, nama: siswa.nama, coinsEarned: coinsReward, streakBonus, totalCoins, newStreak, method },
+      data: {
+        nis,
+        nama: siswa.nama,
+        coinsEarned: coinsReward,
+        streakBonus,
+        totalCoins,
+        newStreak,
+        method,
+      },
     };
   }
 
@@ -358,11 +357,11 @@ export class AbsensiService {
   // =====================================================
   async getSiswaByKelas(kelasId: number) {
     const supabase = this.supabaseService.getClient();
-    const today = this.getTodayString(); // ← FIXED
+    const today = this.getTodayString();
 
     const { data: siswas, error } = await supabase
       .from('siswa')
-      .select('nis, nama, streak, coins')
+      .select('nis, nama, streak, coins, last_streak_date')
       .eq('kelas_id', kelasId)
       .eq('is_active', true)
       .order('nama', { ascending: true });
@@ -370,17 +369,22 @@ export class AbsensiService {
     if (error || !siswas) throw new BadRequestException('Gagal mengambil data siswa');
 
     if (siswas.length === 0) {
-      return { success: true, data: [], meta: { total: 0, sudahAbsen: 0, belumAbsen: 0, tanggal: today } };
+      return {
+        success: true,
+        data: [],
+        meta: { total: 0, sudahAbsen: 0, belumAbsen: 0, tanggal: today },
+      };
     }
 
     const nisList = siswas.map((s) => s.nis);
-    const { data: sudahAbsen } = await supabase
+
+    const { data: absenRows } = await supabase
       .from('absensi_tumbler')
       .select('nis')
       .in('nis', nisList)
       .eq('tanggal', today);
 
-    const sudahAbsenSet = new Set((sudahAbsen || []).map((a) => a.nis));
+    const sudahAbsenSet = new Set((absenRows || []).map((a) => a.nis));
 
     // Ambil izin approved hari ini
     const { data: izinRows } = await supabase
@@ -395,24 +399,30 @@ export class AbsensiService {
       izinMap.set(row.nis, { tipe: row.tipe, catatan: row.catatan ?? null }),
     );
 
-    const result = await Promise.all(
-      siswas.map(async (siswa) => {
-        const streakData = await this.streakService.calculateStreak(siswa.nis);
-        const izin = izinMap.get(siswa.nis);
-        const adaIzin = Boolean(izin);
-        const sudahAbsen = adaIzin ? false : sudahAbsenSet.has(siswa.nis);
-        return {
-          nis: siswa.nis,
-          nama: siswa.nama,
-          streak: streakData.currentStreak,
-          coins: siswa.coins || 0,
-          sudahAbsen,
-          izinHariIni: adaIzin
-            ? { ada: true, tipe: izin?.tipe || null, catatan: izin?.catatan || null }
-            : { ada: false, tipe: null, catatan: null },
-        };
-      }),
+    const streakMap = await this.streakService.calculateEffectiveStreaksInBatch(
+      siswas.map((s) => ({
+        nis: s.nis,
+        streak: s.streak,
+        last_streak_date: s.last_streak_date,
+      })),
     );
+
+    const result = siswas.map((siswa) => {
+      const currentStreak = streakMap.get(siswa.nis) || 0;
+      const izin = izinMap.get(siswa.nis);
+      const adaIzin = Boolean(izin);
+      const absenHariIni = adaIzin ? false : sudahAbsenSet.has(siswa.nis);
+      return {
+        nis: siswa.nis,
+        nama: siswa.nama,
+        streak: currentStreak,
+        coins: siswa.coins || 0,
+        sudahAbsen: absenHariIni,
+        izinHariIni: adaIzin
+          ? { ada: true, tipe: izin?.tipe || null, catatan: izin?.catatan || null }
+          : { ada: false, tipe: null, catatan: null },
+      };
+    });
 
     result.sort((a, b) => {
       if (a.sudahAbsen === b.sudahAbsen) return a.nama.localeCompare(b.nama);
@@ -443,6 +453,7 @@ export class AbsensiService {
       .order('nama', { ascending: true });
 
     if (error) throw new BadRequestException('Gagal mengambil daftar kelas');
+
     const mappedData = (data || []).map((kelas) => ({
       ...kelas,
       tingkat: this.toRoman(Number(kelas.tingkat)),
@@ -472,7 +483,7 @@ export class AbsensiService {
   // =====================================================
   async getStatusHariIni(nis: string) {
     const supabase = this.supabaseService.getClient();
-    const today = this.getTodayString(); // ← FIXED
+    const today = this.getTodayString();
 
     const { data } = await supabase
       .from('absensi_tumbler')
@@ -488,7 +499,7 @@ export class AbsensiService {
   // GET INFO HARI INI — endpoint publik
   // =====================================================
   async getInfoHariIni() {
-    const today = this.getTodayString(); // ← FIXED
+    const today = this.getTodayString();
     const info = await this.getInfoLibur(today);
     return {
       success: true,
