@@ -222,16 +222,57 @@ export class StreakService {
 
   /**
    * Hitung jumlah hari kerja antara 2 tanggal (exclude start, include end)
+   * Dioptimalkan dengan query batch untuk menghindari N+1 query database di dalam loop.
    */
   async countWorkdaysBetween(startDate: Date, endDate: Date, nis?: string): Promise<number> {
+    const supabase = this.supabaseService.getClient();
+
+    const getWibStr = (d: Date) => {
+      const wibDate = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+      return wibDate.toISOString().split('T')[0];
+    };
+
+    const startStr = getWibStr(startDate);
+    const endStr = getWibStr(endDate);
+
+    // Ambil tanggal libur aktif di rentang tanggal ini sekaligus
+    const { data: holidays } = await supabase
+      .from('tanggal_libur')
+      .select('tanggal')
+      .eq('is_active', true)
+      .gte('tanggal', startStr)
+      .lte('tanggal', endStr);
+
+    const holidaySet = new Set((holidays ?? []).map((h) => String(h.tanggal).split('T')[0]));
+
+    // Ambil izin disetujui untuk siswa ini di rentang tanggal ini sekaligus
+    let excusedSet = new Set<string>();
+    if (nis) {
+      const { data: excuses } = await supabase
+        .from('siswa_izin')
+        .select('tanggal')
+        .eq('nis', nis)
+        .eq('status', 'approved')
+        .gte('tanggal', startStr)
+        .lte('tanggal', endStr);
+
+      excusedSet = new Set((excuses ?? []).map((e) => String(e.tanggal).split('T')[0]));
+    }
+
     let count = 0;
     const current = new Date(startDate);
 
     while (current < endDate) {
       current.setDate(current.getDate() + 1);
-      if (await this.isWorkday(current, nis)) {
-        count++;
-      }
+      const day = current.getDay();
+      const isWeekend = day === 0 || day === 6;
+      if (isWeekend) continue;
+
+      const dateStr = getWibStr(current);
+      if (holidaySet.has(dateStr)) continue;
+      if (excusedSet.has(dateStr)) continue;
+
+      count++;
     }
 
     return count;
