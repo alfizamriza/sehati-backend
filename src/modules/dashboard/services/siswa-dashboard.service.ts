@@ -1,12 +1,34 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { SupabaseService } from 'src/supabase/supabase.service';
 import { StreakService } from 'src/modules/streak/streak.service';
-import { LeaderboardService } from 'src/modules/leaderboard/leaderboard.service';
 import { RequestCache } from 'src/common/utils/request-cache';
 
 interface SchoolDay { date: string; label: string }
 
 export type DayStatus = 'hadir' | 'pelanggaran' | 'plastik' | 'libur' | 'izin' | 'kosong';
+
+type DashboardLeaderboardItem = {
+  rank: number;
+  nis: string;
+  nama: string;
+  kelas: string;
+  coins: number;
+  streak: number;
+  medal: 'gold' | 'silver' | 'bronze' | 'none';
+  is_me: boolean;
+  fotoUrl: string | null;
+};
+
+type DashboardLeaderboardSnapshot = {
+  position: number;
+  totalSiswa: number;
+  top: DashboardLeaderboardItem[];
+  me?: {
+    coins: number;
+    streak: number;
+    kelas: string;
+  };
+};
 
 export interface CalendarDay {
   date: string; label: string; dayName: string;
@@ -29,7 +51,6 @@ export class SiswaDashboardService {
   constructor(
     private supabaseService: SupabaseService,
     private streakService: StreakService,
-    private leaderboardService: LeaderboardService,
   ) { }
 
   private convertToRomanNumeral(num: number): string {
@@ -64,35 +85,20 @@ export class SiswaDashboardService {
       SiswaDashboardService.DASHBOARD_CACHE_TTL_MS,
       async () => {
         const [
-          siswaData, streakData, pelanggaranCount, leaderboardDataRaw, historyData, calendarDays,
+          siswaData, streakData, pelanggaranCount, leaderboardSnapshot, historyData, calendarDays,
         ] = await Promise.all([
           this.getSiswaProfile(nis),
           this.streakService.calculateStreak(nis),
           this.getPelanggaranCount(nis),
-          this.leaderboardService.getSekolah(nis),
+          this.getDashboardLeaderboardSnapshot(nis),
           this.getRecentHistory(nis),
           this.getCalendarData(nis, mode, year, month),
         ]);
 
-        const myRankEntry = leaderboardDataRaw.find(s => s.nis === nis);
-        const rankData = { position: myRankEntry?.rank ?? 0, totalSiswa: leaderboardDataRaw.length };
-
-        const leaderboardData = leaderboardDataRaw.slice(0, 3).map((item, index) => ({
-          rank: item.rank,
-          nis: item.nis,
-          nama: item.nama,
-          kelas: item.kelas,
-          coins: item.coins,
-          streak: item.streak,
-          medal: index === 0 ? 'gold' : index === 1 ? 'silver' : 'bronze',
-          isMe: item.is_me,
-          foto_url: item.fotoUrl,
-        }));
-
-        if (myRankEntry) {
-          siswaData.coins = myRankEntry.coins;
-          siswaData.streak = myRankEntry.streak;
-          siswaData.kelas = myRankEntry.kelas;
+        if (leaderboardSnapshot.me) {
+          siswaData.coins = leaderboardSnapshot.me.coins;
+          siswaData.streak = leaderboardSnapshot.me.streak;
+          siswaData.kelas = leaderboardSnapshot.me.kelas;
         }
 
         const complianceChart: ComplianceItem[] = calendarDays.map((d) => ({
@@ -110,8 +116,11 @@ export class SiswaDashboardService {
               isActiveToday: streakData.isStreakActiveToday,
               shouldShowFaded: streakData.shouldShowFaded,
             },
-            ranking: rankData, pelanggaran: pelanggaranCount,
-            leaderboard: leaderboardData, recentHistory: historyData,
+            ranking: {
+              position: leaderboardSnapshot.position,
+              totalSiswa: leaderboardSnapshot.totalSiswa,
+            }, pelanggaran: pelanggaranCount,
+            leaderboard: leaderboardSnapshot.top, recentHistory: historyData,
             complianceChart, calendarDays,
           },
         };
@@ -292,10 +301,105 @@ export class SiswaDashboardService {
   }
 
   // ─── Methods lain tidak berubah ───────────────────────────────
+  private formatKelasFromRelation(kelasRelation: unknown): string {
+    const kelas = Array.isArray(kelasRelation)
+      ? kelasRelation[0]
+      : kelasRelation;
+    if (!kelas || typeof kelas !== 'object') return '-';
+
+    const row = kelas as { nama?: string | null; tingkat?: number | string | null };
+    const tingkatRoman = this.convertToRomanNumeral(Number(row.tingkat ?? 0));
+    return row.nama ? `${tingkatRoman}-${row.nama}` : '-';
+  }
+
+  private mapLeaderboardRow(
+    row: any,
+    rank: number,
+    nisLogin: string,
+  ): DashboardLeaderboardItem {
+    return {
+      rank,
+      nis: String(row?.nis ?? ''),
+      nama: String(row?.nama ?? '-'),
+      kelas: this.formatKelasFromRelation(row?.kelas),
+      coins: Number(row?.coins ?? 0),
+      streak: Number(row?.streak ?? 0),
+      medal: rank === 1 ? 'gold' : rank === 2 ? 'silver' : rank === 3 ? 'bronze' : 'none',
+      is_me: row?.nis === nisLogin,
+      fotoUrl: row?.foto_url ?? null,
+    };
+  }
+
+  private async getDashboardLeaderboardSnapshot(
+    nis: string,
+  ): Promise<DashboardLeaderboardSnapshot> {
+    const supabase = this.supabaseService.getClient();
+
+    const [topResult, meResult, totalResult] = await Promise.all([
+      supabase
+        .from('siswa')
+        .select('nis, nama, coins, streak, foto_url, kelas:kelas_id (nama, tingkat)')
+        .eq('is_active', true)
+        .order('coins', { ascending: false })
+        .order('nama', { ascending: true })
+        .limit(3),
+      supabase
+        .from('siswa')
+        .select('nis, nama, coins, streak, kelas:kelas_id (nama, tingkat)')
+        .eq('nis', nis)
+        .maybeSingle(),
+      supabase
+        .from('siswa')
+        .select('nis', { count: 'exact', head: true })
+        .eq('is_active', true),
+    ]);
+
+    const topRows = topResult.data ?? [];
+    const meRow = meResult.data as any | null;
+    const totalSiswa = totalResult.count ?? topRows.length;
+
+    let position = 0;
+    if (meRow) {
+      const myCoins = Number(meRow.coins ?? 0);
+      const myName = String(meRow.nama ?? '');
+
+      const [higherResult, tieBeforeResult] = await Promise.all([
+        supabase
+          .from('siswa')
+          .select('nis', { count: 'exact', head: true })
+          .eq('is_active', true)
+          .gt('coins', myCoins),
+        supabase
+          .from('siswa')
+          .select('nis', { count: 'exact', head: true })
+          .eq('is_active', true)
+          .eq('coins', myCoins)
+          .lt('nama', myName),
+      ]);
+
+      position = (higherResult.count ?? 0) + (tieBeforeResult.count ?? 0) + 1;
+    }
+
+    return {
+      position,
+      totalSiswa,
+      top: topRows.map((row: any, index: number) =>
+        this.mapLeaderboardRow(row, index + 1, nis),
+      ),
+      me: meRow
+        ? {
+            coins: Number(meRow.coins ?? 0),
+            streak: Number(meRow.streak ?? 0),
+            kelas: this.formatKelasFromRelation(meRow.kelas),
+          }
+        : undefined,
+    };
+  }
+
   private async getSiswaProfile(nis: string) {
     const supabase = this.supabaseService.getClient();
     const { data, error } = await supabase
-      .from('siswa').select('nis, nama, coins, streak, kelas:kelas_id (nama, tingkat)')
+      .from('siswa').select('nis, nama, coins, streak, foto_url, kelas:kelas_id (nama, tingkat)')
       .eq('nis', nis).maybeSingle();
     if (error || !data) throw new BadRequestException('Siswa tidak ditemukan');
     const kelas = Array.isArray(data.kelas) ? data.kelas[0] : data.kelas;
@@ -304,6 +408,7 @@ export class SiswaDashboardService {
       nis: data.nis, nama: data.nama, coins: (data as any).coins || 0,
       streak: (data as any).streak || 0,
       kelas: kelas ? `${tingkatRoman}-${(kelas as any).nama}` : '-',
+      foto_url: (data as any).foto_url ?? null,
     };
   }
 
