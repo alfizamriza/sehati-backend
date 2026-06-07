@@ -2,11 +2,15 @@ import { Controller, Get, Query, Request, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RiwayatKantinService, QueryRiwayatDto } from './riwayat-kantin.service';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { RolesGuard } from 'src/common/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { UserRole } from 'src/common/enums/user-role.enum';
 
 @ApiTags('Riwayat Kantin')
 @ApiBearerAuth('access-token')
 @Controller('api/riwayat')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.KANTIN, UserRole.ADMIN)
 export class RiwayatKantinController {
   constructor(private riwayatService: RiwayatKantinService) {}
 

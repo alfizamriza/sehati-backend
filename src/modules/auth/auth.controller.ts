@@ -30,8 +30,10 @@ export class AuthController {
     return result;
   }
 
-  @Public()
   @Post('register/admin')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Register admin user' })
   @ApiResponse({ status: 201, description: 'Admin registered successfully' })
   async registerAdmin(@Body() registerAdminDto: RegisterAdminDto) {

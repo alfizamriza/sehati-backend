@@ -5,11 +5,15 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TransaksiService } from './transaksi.service';
 import { CreateTransaksiDto } from './dto/transaksi.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { RolesGuard } from 'src/common/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { UserRole } from 'src/common/enums/user-role.enum';
 
 @ApiTags('Transaksi')
 @ApiBearerAuth('access-token')
 @Controller('api/transaksi')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.KANTIN, UserRole.ADMIN)
 export class TransaksiController {
   constructor(private transaksiService: TransaksiService) { }
 

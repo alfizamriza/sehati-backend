@@ -11,10 +11,15 @@ import {
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { PengaturanService } from './pengaturan.service';
 import { Public } from 'src/common/decorators/public.decorator';
+import { PublicJwtAuthGuard } from 'src/common/guards/public.guard';
+import { RolesGuard } from 'src/common/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { UserRole } from 'src/common/enums/user-role.enum';
 
 import { UpdatePengaturanDto } from './dto/update-pengaturan.dto';
 import { BulkUpdatePengaturanDto } from './dto/bulk-update-pengaturan.dto';
@@ -26,6 +31,9 @@ import { CreateAchievementDto } from './dto/create-achievement.dto';
 import { UpdateAchievementDto } from './dto/update-achievement.dto';
 
 @ApiTags('Pengaturan')
+@ApiBearerAuth('access-token')
+@UseGuards(PublicJwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
 @Controller('api/pengaturan')
 export class PengaturanController {
   constructor(private readonly svc: PengaturanService) {}
@@ -65,6 +73,7 @@ export class PengaturanController {
   // ===========================
 
   @Get('libur/list')
+  @Roles(UserRole.ADMIN, UserRole.GURU, UserRole.SISWA, UserRole.KANTIN)
   @ApiOperation({ summary: 'Get holiday date list' })
   findAllLibur() {
     return this.svc.findAllLibur();
@@ -103,6 +112,7 @@ export class PengaturanController {
   // ===========================
 
   @Get('pelanggaran/list')
+  @Roles(UserRole.ADMIN, UserRole.GURU, UserRole.SISWA, UserRole.KANTIN)
   @ApiOperation({ summary: 'Get violation types list' })
   findAllPelanggaran(@Query('kategori') kategori?: string) {
     return this.svc.findAllPelanggaran(kategori);
@@ -142,6 +152,7 @@ export class PengaturanController {
 
   /** GET /pengaturan/achievement/list?tipe=streak */
   @Get('achievement/list')
+  @Roles(UserRole.ADMIN, UserRole.GURU, UserRole.SISWA, UserRole.KANTIN)
   @ApiOperation({ summary: 'Get achievement configuration list' })
   findAllAchievement(@Query('tipe') tipe?: string) {
     return this.svc.findAllAchievement(tipe);
