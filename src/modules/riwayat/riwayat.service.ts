@@ -346,6 +346,7 @@ export class RiwayatService {
     const siswaNisList = [...new Set(rows.map((r) => r.siswa_nis).filter(Boolean))];
     const guruMap: Record<string, string> = {};
     const siswaMap: Record<string, string> = {};
+    
     if (nips.length > 0) {
       const { data: guruRows } = await supabase
         .from('guru').select('nip, nama').in('nip', nips);

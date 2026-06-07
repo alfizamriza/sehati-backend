@@ -269,18 +269,12 @@ export class SiswaDashboardService {
   // DATE HELPERS
   // =====================================================
 
-  /**
-   * FIX 3: Selalu ambil SELURUH bulan, bukan sampai hari ini.
-   * Frontend yang bertanggung jawab menyembunyikan / greying out
-   * tanggal masa depan — backend cukup kirim semua data termasuk
-   * tanggal libur yang belum terjadi.
-   */
+
   private getMonthDays(year?: number, month?: number): SchoolDay[] {
     const now = new Date();
     const y = year ?? now.getFullYear();
     const m = month ?? (now.getMonth() + 1); // 1-based
 
-    // Selalu ambil seluruh hari dalam bulan (bukan sampai hari ini)
     const totalDays = new Date(y, m, 0).getDate();
 
     const days: SchoolDay[] = [];
@@ -388,10 +382,10 @@ export class SiswaDashboardService {
       ),
       me: meRow
         ? {
-            coins: Number(meRow.coins ?? 0),
-            streak: Number(meRow.streak ?? 0),
-            kelas: this.formatKelasFromRelation(meRow.kelas),
-          }
+          coins: Number(meRow.coins ?? 0),
+          streak: Number(meRow.streak ?? 0),
+          kelas: this.formatKelasFromRelation(meRow.kelas),
+        }
         : undefined,
     };
   }
