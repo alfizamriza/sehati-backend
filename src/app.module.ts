@@ -35,10 +35,10 @@ import { APP_GUARD } from '@nestjs/core';
       load: [config.appConfig, config.jwtConfig, config.databaseConfig, config.corsConfig],
       envFilePath: ['.env.local', '.env'],
     }),
-    ThrottlerModule.forRoot({
-      ttl: 60,
+    ThrottlerModule.forRoot([{
+      ttl: 60000,
       limit: 20,
-    }),
+    }]),
     SupabaseModule,
     DatabaseModule,
     HealthModule,
