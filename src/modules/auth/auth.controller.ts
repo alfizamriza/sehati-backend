@@ -1,4 +1,5 @@
 import { Controller, Post, Body, Get, UseGuards, Req, Query, Res } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -17,6 +18,7 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Public()
+  @Throttle(5, 60)
   @Post('login')
   @ApiOperation({ summary: 'Login user' })
   @ApiResponse({ status: 200, description: 'Login successful' })
@@ -50,9 +52,8 @@ export class AuthController {
     return this.authService.getProfile(user.userId, user.role);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @Public()
   @Post('logout')
-  @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Logout user' })
   @ApiResponse({ status: 200, description: 'Logout successful' })
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
@@ -101,7 +102,7 @@ export class AuthController {
     const cookieDomain = process.env.AUTH_COOKIE_DOMAIN || undefined;
     const baseOptions = {
       httpOnly: true,
-      sameSite: (isSecure ? 'none' : 'lax') as 'none' | 'lax' | 'strict',
+      sameSite: 'none' as 'none' | 'lax' | 'strict',
       secure: isSecure,
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
@@ -122,7 +123,7 @@ export class AuthController {
       process.env.NODE_ENV === 'production';
     const cookieDomain = process.env.AUTH_COOKIE_DOMAIN || undefined;
     const clearOptions = {
-      sameSite: (isSecure ? 'none' : 'lax') as 'none' | 'lax' | 'strict',
+      sameSite: 'none' as 'none' | 'lax' | 'strict',
       secure: isSecure,
       path: '/',
       ...(cookieDomain ? { domain: cookieDomain } : {}),

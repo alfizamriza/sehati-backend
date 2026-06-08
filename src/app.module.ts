@@ -25,6 +25,8 @@ import { RiwayatKantinModule } from './modules/riwayat-kantin/riwayat-kantin.mod
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { IzinModule } from './modules/izin/izin.module';
 import * as config from './config/app.config';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 
 @Module({
   imports: [
@@ -32,6 +34,10 @@ import * as config from './config/app.config';
       isGlobal: true,
       load: [config.appConfig, config.jwtConfig, config.databaseConfig, config.corsConfig],
       envFilePath: ['.env.local', '.env'],
+    }),
+    ThrottlerModule.forRoot({
+      ttl: 60,
+      limit: 20,
     }),
     SupabaseModule,
     DatabaseModule,
@@ -57,6 +63,12 @@ import * as config from './config/app.config';
     IzinModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}
