@@ -13,10 +13,12 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { KelasService } from './kelas.service';
 import { CreateKelasDto } from './dto/create-kelas.dto';
 import { UpdateKelasDto } from './dto/update-kelas.dto';
+import { TransferStudentsDto } from './dto/transfer-students.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { UserRole } from 'src/common/enums/user-role.enum';
+
 
 @ApiTags('Kelas')
 @ApiBearerAuth('access-token')
@@ -66,5 +68,20 @@ export class KelasController {
   @ApiOperation({ summary: 'Delete class data by ID' })
   async remove(@Param('id', ParseIntPipe) id: number) {
     return this.kelasService.remove(id);
+  }
+
+  // POST /api/kelas/:id/transfer-students - Transfer multiple students to another class
+  @Post(':id/transfer-students')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Transfer multiple students to another class' })
+  async transferStudents(
+    @Param('id', ParseIntPipe) sourceKelasId: number,
+    @Body() transferDto: TransferStudentsDto,
+  ) {
+    return this.kelasService.transferStudents(
+      sourceKelasId,
+      transferDto.siswaList,
+      transferDto.targetKelasId,
+    );
   }
 }

@@ -404,4 +404,106 @@ export class KelasService {
       message: `Kelas ${existing.nama} berhasil dihapus`,
     };
   }
+
+  // ==========================================
+  // TRANSFER MULTIPLE STUDENTS TO ANOTHER CLASS
+  // ==========================================
+  async transferStudents(
+    sourceKelasId: number,
+    siswaList: string[],
+    targetKelasId: number,
+  ) {
+    const supabase = this.supabaseService.getClient();
+
+    // Validate source kelas exists
+    const { data: sourceKelas, error: sourceError } = await supabase
+      .from('kelas')
+      .select('id, nama')
+      .eq('id', sourceKelasId)
+      .single();
+
+    if (sourceError || !sourceKelas) {
+      throw new NotFoundException('Kelas sumber tidak ditemukan');
+    }
+
+    // Validate target kelas exists
+    const { data: targetKelas, error: targetError } = await supabase
+      .from('kelas')
+      .select('id, nama, kapasitas_maksimal')
+      .eq('id', targetKelasId)
+      .single();
+
+    if (targetError || !targetKelas) {
+      throw new NotFoundException('Kelas tujuan tidak ditemukan');
+    }
+
+    // Cannot transfer to same class
+    if (sourceKelasId === targetKelasId) {
+      throw new BadRequestException(
+        'Kelas sumber dan tujuan tidak boleh sama',
+      );
+    }
+
+    // Check if all students exist in source class
+    const { data: existingStudents, error: checkError } = await supabase
+      .from('siswa')
+      .select('nis, nama')
+      .in('nis', siswaList)
+      .eq('kelas_id', sourceKelasId)
+      .eq('is_active', true);
+
+    if (checkError) {
+      throw new BadRequestException('Gagal memvalidasi siswa');
+    }
+
+    if (!existingStudents || existingStudents.length === 0) {
+      throw new BadRequestException(
+        'Tidak ada siswa aktif yang ditemukan di kelas sumber',
+      );
+    }
+
+    if (existingStudents.length !== siswaList.length) {
+      const foundNIS = existingStudents.map((s) => s.nis);
+      const notFound = siswaList.filter((nis) => !foundNIS.includes(nis));
+      throw new BadRequestException(
+        `Siswa dengan NIS berikut tidak ditemukan atau tidak aktif di kelas sumber: ${notFound.join(', ')}`,
+      );
+    }
+
+    // Check target class capacity
+    const { count: currentStudentsInTarget } = await supabase
+      .from('siswa')
+      .select('*', { count: 'exact', head: true })
+      .eq('kelas_id', targetKelasId)
+      .eq('is_active', true);
+
+    const newTotal =
+      (currentStudentsInTarget || 0) + existingStudents.length;
+    if (newTotal > targetKelas.kapasitas_maksimal) {
+      throw new BadRequestException(
+        `Kapasitas kelas tujuan tidak mencukupi. Tersedia: ${targetKelas.kapasitas_maksimal - (currentStudentsInTarget || 0)}, dibutuhkan: ${existingStudents.length}`,
+      );
+    }
+
+    // Perform bulk transfer
+    const { error: transferError } = await supabase
+      .from('siswa')
+      .update({ kelas_id: targetKelasId, updated_at: new Date().toISOString() })
+      .in('nis', siswaList);
+
+    if (transferError) {
+      throw new BadRequestException('Gagal memindahkan siswa');
+    }
+
+    return {
+      success: true,
+      message: `${existingStudents.length} siswa berhasil dipindahkan dari ${sourceKelas.nama} ke ${targetKelas.nama}`,
+      data: {
+        transferredCount: existingStudents.length,
+        students: existingStudents.map((s) => ({ nis: s.nis, nama: s.nama })),
+        sourceKelas: { id: sourceKelas.id, nama: sourceKelas.nama },
+        targetKelas: { id: targetKelas.id, nama: targetKelas.nama },
+      },
+    };
+  }
 }
