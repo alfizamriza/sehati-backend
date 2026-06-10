@@ -1,6 +1,6 @@
 import { Controller, Post, Body, Get, UseGuards, Req, Query, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiExcludeEndpoint } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -15,7 +15,7 @@ import { UserRole } from '../../common/enums/user-role.enum';
 @ApiTags('Authentication')
 @Controller('api/auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private authService: AuthService) { }
 
   @Public()
   @Throttle({ default: { ttl: 60000, limit: 5 } })
@@ -35,6 +35,7 @@ export class AuthController {
   @Post('register/admin')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
+  @ApiExcludeEndpoint()
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Register admin user' })
   @ApiResponse({ status: 201, description: 'Admin registered successfully' })
