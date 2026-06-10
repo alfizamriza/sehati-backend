@@ -1,19 +1,21 @@
 import { Controller, Get } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiExcludeEndpoint, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SupabaseService } from './supabase/supabase.service';
+
 
 @ApiTags('Utility')
 @Controller()
 export class AppController {
-  constructor(private supabaseService: SupabaseService) {}
+  constructor(private supabaseService: SupabaseService) { }
 
   @Get('test')
+  @ApiExcludeEndpoint()
   @ApiOperation({ summary: 'Test Supabase connection' })
   async testConnection() {
     const supabase = this.supabaseService.getClient();
-      
+
     console.log('Testing Supabase connection...');
-    
+
     const { data, error } = await supabase
       .from('users')
       .select('nama');

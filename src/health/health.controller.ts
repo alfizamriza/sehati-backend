@@ -1,16 +1,17 @@
 import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiExcludeController, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { Public } from '../common/decorators/public.decorator';
 
 @ApiTags('Health')
+@ApiExcludeController()
 @Controller('api/health')
 export class HealthController {
   constructor(
     private supabaseService: SupabaseService,
     private configService: ConfigService,
-  ) {}
+  ) { }
 
   @Public()
   @Get('check')
