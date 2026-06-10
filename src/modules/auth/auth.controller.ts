@@ -100,11 +100,15 @@ export class AuthController {
       req.get('x-forwarded-proto') === 'https' ||
       process.env.NODE_ENV === 'production';
     const cookieDomain = process.env.AUTH_COOKIE_DOMAIN || undefined;
+
+    const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '7d';
+    const cookieMaxAge = parseExpiresInToMs(jwtExpiresIn);
+
     const baseOptions = {
       httpOnly: true,
       sameSite: 'none' as 'none' | 'lax' | 'strict',
       secure: isSecure,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: cookieMaxAge,
       path: '/',
       ...(cookieDomain ? { domain: cookieDomain } : {}),
     };
@@ -137,5 +141,27 @@ export class AuthController {
       ...clearOptions,
       httpOnly: false,
     });
+  }
+}
+
+function parseExpiresInToMs(expiresIn: string | number): number {
+  if (typeof expiresIn === 'number') return expiresIn;
+  if (!expiresIn) return 7 * 24 * 60 * 60 * 1000; // default 7 days
+
+  if (/^\d+$/.test(expiresIn)) {
+    return parseInt(expiresIn, 10);
+  }
+
+  const match = expiresIn.match(/^(\d+)([smhd])$/);
+  if (!match) return 7 * 24 * 60 * 60 * 1000;
+
+  const value = parseInt(match[1], 10);
+  const unit = match[2];
+  switch (unit) {
+    case 's': return value * 1000;
+    case 'm': return value * 60 * 1000;
+    case 'h': return value * 60 * 60 * 1000;
+    case 'd': return value * 24 * 60 * 60 * 1000;
+    default: return 7 * 24 * 60 * 60 * 1000;
   }
 }
